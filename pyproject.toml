@@ -1,0 +1,11 @@
+[build-system]
+requires = ["flit_core >=3.2,<4", "scikit-learn", "sympy", "joblib"]
+build-backend = "flit_core.buildapi"
+
+[project]
+name = "symkit"
+authors = [{name = "Rémi Adon", email = "remi.adon@gmail.com"}]
+dynamic = ["version", "description"]
+
+[project.urls]
+Home = "https://github.com/remiadon/symkit"
