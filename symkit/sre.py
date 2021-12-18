@@ -4,11 +4,14 @@ from typing import AnyStr, List
 import joblib
 import numpy as np
 import pandas as pd
-from scipy.sparse.construct import rand
-from sklearn.metrics import mean_squared_error, r2_score
+from sklearn.base import BaseEstimator, RegressorMixin
+from sklearn.metrics import mean_squared_error
+from sklearn.utils import check_array, check_X_y
 
 # from joblib.parallel import delayed
-from sympy import Expr, symbols
+from sympy import Expr, Pow, symbols
+from sympy.core import symbol
+from sympy.core.basic import preorder_traversal
 from sympy.core.symbol import Symbol
 
 from .expression import (
@@ -28,7 +31,7 @@ from .expression import (
 
 # TODO : joblib.cache this function
 def _execute(expr: Expr, X: pd.DataFrame, engine="numpy"):
-    from sympy import Float, Integer, lambdify, simplify
+    from sympy import lambdify, simplify
 
     expr = simplify(expr)  # TODO : remove ?
     if expr.is_number:
@@ -40,6 +43,13 @@ def _execute(expr: Expr, X: pd.DataFrame, engine="numpy"):
     modules = [engine, dict(pdiv=pdiv)]
     fn = lambdify(cols, expr, modules)
     res = fn(*args)
+
+    if np.isnan(res).any():  # FIXME this happened with expr=X9**(-X10)
+        return np.zeros(len(X), dtype=float)
+
+    if ((res == np.inf) | (res == -np.inf)).any():  # TODO this also happens with **
+        return np.zeros(len(X), dtype=float)
+
     return res
 
 
@@ -56,7 +66,7 @@ def pick(size_getter, target_size, pool, limit=1_000, **kwargs):
             break
 
 
-class SymbolicRegression:
+class SymbolicRegression(BaseEstimator, RegressorMixin):
     def __init__(
         self,
         operators: List[Expr] = [add2, sub2, mul2, div2],
@@ -64,6 +74,7 @@ class SymbolicRegression:
         init_size: int = None,
         n_iter: int = 100,
         n_iter_no_change: int = 10,
+        selection_ratio=0.5,
         ratios=dict(
             reproduction=0.4, crossover=0.2, subtree_mutation=0.2, hoist_mutation=0.2
         ),
@@ -80,22 +91,23 @@ class SymbolicRegression:
         self.n_iter = n_iter
         self.n_iter_no_change = n_iter_no_change
         self.operators = operators
-        self.selection_ratio = 0.5
-        self.expression = None
-        self.hall_of_fame = set()
-        self.history = list()
+        self.selection_ratio = selection_ratio
         assert isinstance(ratios, dict) and sum(ratios.values()) == 1.0
         self.ratios = ratios
         self.memory = memory
         self.engine = engine
 
     def fit(self, X, y):
+        # self.ratios=dict(reproduction=0.4, crossover=0.2, subtree_mutation=0.2, hoist_mutation=0.2)
+        X, y = check_X_y(X, y)  # TODO : check parameter setting for `check_X_y`
         if not isinstance(X, pd.DataFrame):
-            raise ValueError("`X` should be a pandas dataframe")
+            X = pd.DataFrame(data=X, columns=map(str, symbols(f"X:{X.shape[1]}")))
 
+        history = list()
         syms = symbols(X.columns.tolist())
         init_size = self.init_size or max(len(syms), len(self.operators))
         population_size = self.population_size or len(self.operators) ** 2
+
         reproduction_size = int(population_size * self.ratios["reproduction"])
         subtree_mutation_size = int(population_size * self.ratios["subtree_mutation"])
         hoist_mutation_size = int(population_size * self.ratios["hoist_mutation"])
@@ -126,7 +138,7 @@ class SymbolicRegression:
                 fitness_max=fitness_vect.max(),
                 expr_complexity_mean=np.mean(fitness_vect.index.map(complexity)),
             )
-            self.history.append(history_payload)
+            history.append(history_payload)
 
             # REPRODUCTIONS
             reproduction = fitness_vect.nlargest(reproduction_size)
@@ -156,6 +168,8 @@ class SymbolicRegression:
                 child = crossover(expr1, expr2)
                 population.add(child)
 
+        self.symbols = syms
+        self.history = history
         self.hall_of_fame = self.evaluate_population(population, X, y)
         self.expression = self.hall_of_fame.idxmax()
         return self
@@ -177,16 +191,28 @@ class SymbolicRegression:
         fitness_vect = pd.Series(fitness)
         return fitness_vect
 
+    def predict(self, X, expr=None):
+        if expr is None:
+            expr = getattr(self, "expression", None)
+        if expr is None:
+            raise ValueError("unfitted model")
+        if not isinstance(X, pd.DataFrame):
+            X = check_array(X)
+            cols = (
+                map(str, self.symbols)
+                if hasattr(self, "symbols")
+                else symbols(f"X:{X.shape[1]}")
+            )
+            X = pd.DataFrame(data=X, columns=cols)
+        y_pred = _execute(expr, X, engine=self.engine)
+        return y_pred
+
     def score(self, X, y, expr=None):
         if expr is None:
-            expr = self.expression
+            expr = getattr(self, "expression", None)
+        if expr is None:
+            raise ValueError("unfitted model")
         if complexity(expr) > 10:
             return -np.inf
-        if expr is None:
-            raise ValueError()
-        y_pred = _execute(expr, X, engine=self.engine)
+        y_pred = self.predict(X, expr=expr)
         return -mean_squared_error(y_pred, y, squared=False)
-
-    def fitness(self, X, y, expr=None):
-        expr = expr or self.expression
-        return self.score(X, y, expr=expr) - (complexity(expr) / 100)
