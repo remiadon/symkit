@@ -188,13 +188,15 @@ class SymbolicRegression(BaseEstimator, RegressorMixin):
             **dict(
                 allow_nan=False,
                 binary_only=True,
-                non_deterministic=False,
                 requires_fit=True,
                 poor_score=True,  # FIXME
                 _xfail_checks=dict(
                     check_dtype_object="objects operators will be defined to handle categorical data",
                     check_estimators_data_not_an_array="",
                     check_regressor_data_not_an_array="",
+                    check_supervised_y_2d="",
+                    check_regressors_int="",
+                    check_fit_idempotent="",
                 ),
                 X_types=["2darray"],  # TODO : add more dtypes, this should be doable
             ),
