@@ -56,7 +56,7 @@ def test_score(expr, score, body_mass_index):
     # test scoring on data corresponding to the body mass index formulae
     sre = SymbolicRegression(memory=None)
     X, y = body_mass_index
-    sre.expression = parse_expr(expr)
+    sre.expression_ = parse_expr(expr)
     sc = sre.score(X, y)
     assert sc == pytest.approx(score, 0.05)
 
@@ -73,10 +73,10 @@ def test_evaluate_population(body_mass_index, body_mass_candidate_expressions):
     )
 
 
-def test_fit(body_mass_index, mock_joblib):
+def test_fit(body_mass_index):
     X, y = body_mass_index
     sre = SymbolicRegression(n_iter=10, population_size=100)
     sre.fit(X, y)
-    assert sre.expression
-    assert sre.hall_of_fame[sre.expression] == pytest.approx(0.0, 0.1)
-    assert complexity(sre.expression) < 10
+    assert sre.expression_
+    assert sre.hall_of_fame_[sre.expression_] == pytest.approx(0.0, 0.1)
+    assert complexity(sre.expression_) < 10

@@ -5,13 +5,13 @@ import joblib
 import numpy as np
 import pandas as pd
 from sklearn.base import BaseEstimator, RegressorMixin
+from sklearn.exceptions import NotFittedError
 from sklearn.metrics import mean_squared_error
 from sklearn.utils import check_array, check_X_y
+from sklearn.utils.validation import check_random_state
 
 # from joblib.parallel import delayed
-from sympy import Expr, Pow, symbols
-from sympy.core import symbol
-from sympy.core.basic import preorder_traversal
+from sympy import Expr, symbols
 from sympy.core.symbol import Symbol
 
 from .expression import (
@@ -31,9 +31,10 @@ from .expression import (
 
 # TODO : joblib.cache this function
 def _execute(expr: Expr, X: pd.DataFrame, engine="numpy"):
-    from sympy import lambdify, simplify
+    from sympy import lambdify, nan, oo, zoo
 
-    expr = simplify(expr)  # TODO : remove ?
+    if expr.has(oo, -oo, zoo, nan):
+        return np.zeros(len(X), dtype=float)  # TODO log this
     if expr.is_number:
         return np.repeat(float(expr), len(X)).astype(float)
 
@@ -85,6 +86,7 @@ class SymbolicRegression(BaseEstimator, RegressorMixin):
             bytes_limit=2 ** 22,  # 4 MegaBytes
         ),
         engine: AnyStr = "numpy",
+        random_state=12,
     ):
         self.population_size = population_size
         self.init_size = init_size
@@ -96,9 +98,10 @@ class SymbolicRegression(BaseEstimator, RegressorMixin):
         self.ratios = ratios
         self.memory = memory
         self.engine = engine
+        self.random_state = random_state
 
     def fit(self, X, y):
-        # self.ratios=dict(reproduction=0.4, crossover=0.2, subtree_mutation=0.2, hoist_mutation=0.2)
+        random_state = check_random_state(self.random_state)
         X, y = check_X_y(X, y)  # TODO : check parameter setting for `check_X_y`
         if not isinstance(X, pd.DataFrame):
             X = pd.DataFrame(data=X, columns=map(str, symbols(f"X:{X.shape[1]}")))
@@ -117,9 +120,10 @@ class SymbolicRegression(BaseEstimator, RegressorMixin):
         # use a set for deduplication
         population = set()
         while len(population) < population_size:
-            population.add(random_expr(ops=self.operators, syms=syms, size=init_size))
-
-        # parent_size = math.ceil(len(population) * self.selection_ratio)
+            expr = random_expr(
+                ops=self.operators, syms=syms, size=init_size, random_state=random_state
+            )
+            population.add(expr)
 
         max_fit = -np.inf
         n_iter_no_change = 0
@@ -147,7 +151,7 @@ class SymbolicRegression(BaseEstimator, RegressorMixin):
             # HOIST MUTATIONS
             target_size = reproduction_size + hoist_mutation_size
             for expr in pick(population.__len__, target_size, reproduction.index):
-                hoisted = hoist_mutation(expr)
+                hoisted = hoist_mutation(expr, random_state=random_state)
                 population.add(hoisted)
 
             # SUBTREE MUTATIONS
@@ -156,7 +160,11 @@ class SymbolicRegression(BaseEstimator, RegressorMixin):
                 n_symbols = expr.count(Symbol)
                 mutation_size = np.ceil(np.log(n_symbols))
                 subtree_mutant = subtree_mutation(
-                    expr, self.operators, syms, size=mutation_size
+                    expr,
+                    self.operators,
+                    syms,
+                    size=mutation_size,
+                    random_state=random_state,
                 )
                 population.add(subtree_mutant)
 
@@ -165,14 +173,32 @@ class SymbolicRegression(BaseEstimator, RegressorMixin):
             for expr1, expr2 in pick(
                 population.__len__, target_size, reproduction.index, k=2
             ):
-                child = crossover(expr1, expr2)
+                child = crossover(expr1, expr2, random_state=random_state)
                 population.add(child)
 
-        self.symbols = syms
-        self.history = history
-        self.hall_of_fame = self.evaluate_population(population, X, y)
-        self.expression = self.hall_of_fame.idxmax()
+        self.symbols_ = syms
+        self.history_ = history
+        self.hall_of_fame_ = self.evaluate_population(population, X, y)
+        self.expression_ = self.hall_of_fame_.idxmax()
         return self
+
+    def _get_tags(self):
+        return {
+            **super()._get_tags(),
+            **dict(
+                allow_nan=False,
+                binary_only=True,
+                non_deterministic=False,
+                requires_fit=True,
+                poor_score=True,  # FIXME
+                _xfail_checks=dict(
+                    check_dtype_object="objects operators will be defined to handle categorical data",
+                    check_estimators_data_not_an_array="",
+                    check_regressor_data_not_an_array="",
+                ),
+                X_types=["2darray"],  # TODO : add more dtypes, this should be doable
+            ),
+        }
 
     def evaluate_population(self, population: List[Expr], X, y):
         """
@@ -193,25 +219,24 @@ class SymbolicRegression(BaseEstimator, RegressorMixin):
 
     def predict(self, X, expr=None):
         if expr is None:
-            expr = getattr(self, "expression", None)
+            expr = getattr(self, "expression_", None)
         if expr is None:
-            raise ValueError("unfitted model")
+            raise NotFittedError()
         if not isinstance(X, pd.DataFrame):
             X = check_array(X)
-            cols = (
-                map(str, self.symbols)
-                if hasattr(self, "symbols")
-                else symbols(f"X:{X.shape[1]}")
-            )
+            syms = getattr(self, "symbols_") or symbols(f"X:{X.shape[1]}")
+            cols = map(str, syms)
             X = pd.DataFrame(data=X, columns=cols)
         y_pred = _execute(expr, X, engine=self.engine)
         return y_pred
 
+    # TODO predict_proba from (mean) sigmoid from self.expression | self.hall_of_fame
+
     def score(self, X, y, expr=None):
         if expr is None:
-            expr = getattr(self, "expression", None)
+            expr = getattr(self, "expression_", None)
         if expr is None:
-            raise ValueError("unfitted model")
+            raise NotFittedError()
         if complexity(expr) > 10:
             return -np.inf
         y_pred = self.predict(X, expr=expr)
