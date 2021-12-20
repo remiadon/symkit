@@ -1,0 +1,4 @@
+.asv/
+*.pyc
+*.tar.gz
+*.whl
