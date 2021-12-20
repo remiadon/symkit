@@ -46,10 +46,10 @@ def body_mass_candidate_expressions():
 @pytest.mark.parametrize(
     "expr,score",
     [
-        ("height * weight + 2", -109.930),
-        ("height - 3", -26.394),
-        ("(height * weight) ** 2", -18096.514),
-        ("weight / (height ** 2)", -0.0),  # body mass index forumlae
+        ("height * weight + 2", -3138.02),
+        ("height - 3", -179.96),
+        ("(height * weight) ** 2", -85065064.57),
+        ("weight / (height ** 2)", 1.0),  # body mass index forumlae
     ],
 )
 def test_score(expr, score, body_mass_index):
@@ -68,7 +68,7 @@ def test_evaluate_population(body_mass_index, body_mass_candidate_expressions):
     fitness = sre.evaluate_population(population, X, y)
     pd.testing.assert_series_equal(
         fitness,
-        pd.Series([-109.930, -26.394, -18096.514, -0.0], index=population),
+        pd.Series([-3138.02, -179.96, -85065064.57, 1.0], index=population),
         atol=0.1,
     )
 
@@ -78,5 +78,5 @@ def test_fit(body_mass_index):
     sre = SymbolicRegression(n_iter=10, population_size=100)
     sre.fit(X, y)
     assert sre.expression_
-    assert sre.hall_of_fame_[sre.expression_] == pytest.approx(0.0, 0.1)
+    assert sre.hall_of_fame_[sre.expression_] == pytest.approx(1.0, 0.1)
     assert complexity(sre.expression_) < 10

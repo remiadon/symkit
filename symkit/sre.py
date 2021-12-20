@@ -6,7 +6,6 @@ import numpy as np
 import pandas as pd
 from sklearn.base import BaseEstimator, RegressorMixin
 from sklearn.exceptions import NotFittedError
-from sklearn.metrics import mean_squared_error
 from sklearn.utils import check_array, check_X_y
 from sklearn.utils.validation import check_random_state
 
@@ -235,6 +234,8 @@ class SymbolicRegression(BaseEstimator, RegressorMixin):
     # TODO predict_proba from (mean) sigmoid from self.expression | self.hall_of_fame
 
     def score(self, X, y, expr=None):
+        from sklearn.metrics import r2_score
+
         if expr is None:
             expr = getattr(self, "expression_", None)
         if expr is None:
@@ -242,4 +243,4 @@ class SymbolicRegression(BaseEstimator, RegressorMixin):
         if complexity(expr) > 10:
             return -np.inf
         y_pred = self.predict(X, expr=expr)
-        return -mean_squared_error(y_pred, y, squared=False)
+        return r2_score(y, y_pred)

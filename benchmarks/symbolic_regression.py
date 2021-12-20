@@ -8,7 +8,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import r2_score
 
 
-class BenchSuite:
+class BostonSuite:
     """"""
     params = [10, 50, 100]
     param_names = ["population_size"]
