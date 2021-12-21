@@ -21,10 +21,6 @@ class BostonSuite:
         sre = SymbolicRegression(population_size=population_size)
         sre.fit(self.X_train, self.y_train)
 
-    def mem_fit(self, population_size):
-        sre = SymbolicRegression(population_size=population_size)
-        sre.fit(self.X_train, self.y_train)
-
     def track_r2_score(self, population_size):
         sre = SymbolicRegression(population_size=population_size)
         sre.fit(self.X_train, self.y_train)

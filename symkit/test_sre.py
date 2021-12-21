@@ -1,9 +1,10 @@
 import pandas as pd
 import pytest
+from sympy import Symbol
 from sympy.parsing.sympy_parser import parse_expr
 
 from .expression import complexity
-from .sre import SymbolicRegression
+from .sre import SymbolicRegression, _execute
 
 
 @pytest.fixture
@@ -54,16 +55,20 @@ def body_mass_candidate_expressions():
 )
 def test_score(expr, score, body_mass_index):
     # test scoring on data corresponding to the body mass index formulae
-    sre = SymbolicRegression(memory=None)
+    sre = SymbolicRegression()
     X, y = body_mass_index
     sre.expression_ = parse_expr(expr)
     sc = sre.score(X, y)
     assert sc == pytest.approx(score, 0.05)
 
 
-def test_evaluate_population(body_mass_index, body_mass_candidate_expressions):
+@pytest.mark.parametrize("elimination", [True, False])
+def test_evaluate_population(
+    body_mass_index, body_mass_candidate_expressions, elimination
+):
     population = [parse_expr(e) for e in body_mass_candidate_expressions]
-    sre = SymbolicRegression(memory=None)
+    sre = SymbolicRegression(elimination=elimination)
+    sre._execute = _execute  # sklearn prohibits setting attributes at init time
     X, y = body_mass_index
     fitness = sre.evaluate_population(population, X, y)
     pd.testing.assert_series_equal(
@@ -71,6 +76,9 @@ def test_evaluate_population(body_mass_index, body_mass_candidate_expressions):
         pd.Series([-3138.02, -179.96, -85065064.57, 1.0], index=population),
         atol=0.1,
     )
+    evaluated_syms = set.union(*fitness.index.map(lambda e: e.find(Symbol)))
+    orig_syms = set.union(*(_.find(Symbol) for _ in population))
+    assert evaluated_syms == orig_syms
 
 
 def test_fit(body_mass_index):

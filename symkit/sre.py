@@ -1,4 +1,5 @@
 import random
+from functools import partial
 from typing import AnyStr, List
 
 import joblib
@@ -6,6 +7,7 @@ import numpy as np
 import pandas as pd
 from sklearn.base import BaseEstimator, RegressorMixin
 from sklearn.exceptions import NotFittedError
+from sklearn.metrics import r2_score
 from sklearn.utils import check_array, check_X_y
 from sklearn.utils.validation import check_random_state
 
@@ -29,7 +31,7 @@ from .expression import (
 
 
 # TODO : joblib.cache this function
-def _execute(expr: Expr, X: pd.DataFrame, engine="numpy"):
+def _execute(expr: Expr, X: pd.DataFrame, modules="numpy"):
     from sympy import lambdify, nan, oo, zoo
 
     if expr.has(oo, -oo, zoo, nan):
@@ -37,11 +39,9 @@ def _execute(expr: Expr, X: pd.DataFrame, engine="numpy"):
     if expr.is_number:
         return np.repeat(float(expr), len(X)).astype(float)
 
-    common_syms = [str(_) for _ in get_symbols(expr)]
-    cols = X.columns.intersection(common_syms)
-    args = [X[col].values for col in cols]
-    modules = [engine, dict(pdiv=pdiv)]
-    fn = lambdify(cols, expr, modules)
+    syms = [str(_) for _ in get_symbols(expr)]
+    args = X[syms].values.T
+    fn = lambdify(syms, expr, modules)
     res = fn(*args)
 
     if np.isnan(res).any():  # FIXME this happened with expr=X9**(-X10)
@@ -51,6 +51,10 @@ def _execute(expr: Expr, X: pd.DataFrame, engine="numpy"):
         return np.zeros(len(X), dtype=float)
 
     return res
+
+
+def score(y, y_pred, expr):
+    return r2_score(y, y_pred) - complexity(expr) / 100
 
 
 def pick(size_getter, target_size, pool, limit=1_000, **kwargs):
@@ -78,14 +82,13 @@ class SymbolicRegression(BaseEstimator, RegressorMixin):
         ratios=dict(
             reproduction=0.4, crossover=0.2, subtree_mutation=0.2, hoist_mutation=0.2
         ),
-        memory=joblib.Memory(
-            location="~/symkit_data/",
-            backend="local",
-            mmap_mode=None,  # no mmap --> reload a result vector entirely
-            bytes_limit=2 ** 22,  # 4 MegaBytes
-        ),
-        engine: AnyStr = "numpy",
+        memory=joblib.Memory(location=None),
+        modules: AnyStr = [
+            "numpy",
+            dict(pdiv=pdiv),
+        ],  # TODO : protected division with Piecewise
         random_state=12,
+        elimination=False,  # TODO make this work
     ):
         self.population_size = population_size
         self.init_size = init_size
@@ -96,14 +99,20 @@ class SymbolicRegression(BaseEstimator, RegressorMixin):
         assert isinstance(ratios, dict) and sum(ratios.values()) == 1.0
         self.ratios = ratios
         self.memory = memory
-        self.engine = engine
         self.random_state = random_state
+        self.elimination = elimination
+        self.modules = modules
 
     def fit(self, X, y):
         random_state = check_random_state(self.random_state)
-        X, y = check_X_y(X, y)  # TODO : check parameter setting for `check_X_y`
         if not isinstance(X, pd.DataFrame):
+            X, y = check_X_y(X, y)  # TODO : check parameter setting for `check_X_y`
             X = pd.DataFrame(data=X, columns=map(str, symbols(f"X:{X.shape[1]}")))
+
+        # FIXME we should not mutate data, see `X.loc[:, ...] = ...` in self.evaluate_population
+        self._execute = self.memory.cache(
+            partial(_execute, modules=self.modules), ignore=["X"]
+        )
 
         history = list()
         syms = symbols(X.columns.tolist())
@@ -196,12 +205,14 @@ class SymbolicRegression(BaseEstimator, RegressorMixin):
                     check_supervised_y_2d="",
                     check_regressors_int="",
                     check_fit_idempotent="",
+                    check_fit2d_1sample="",
+                    check_no_attributes_set_in_init="need to set self.execute_ at init time",
                 ),
                 X_types=["2darray"],  # TODO : add more dtypes, this should be doable
             ),
         }
 
-    def evaluate_population(self, population: List[Expr], X, y):
+    def evaluate_population(self, population: List[Expr], X: pd.DataFrame, y):
         """
         apply a population of sympy expression onto the input data `X`
 
@@ -209,14 +220,30 @@ class SymbolicRegression(BaseEstimator, RegressorMixin):
         pre-computed results.
         """
         # TODO
-        # 1. extract common subexpr via sympy.cse
-        # 2. compute those subexpressions
-        # 3. cache calls to _execute
+        # 1. cache calls to _execute
 
         # TODO parallel execution
-        fitness = {expr: self.score(X, y, expr=expr) for expr in population}
-        fitness_vect = pd.Series(fitness)
-        return fitness_vect
+        from sympy import cse
+
+        def infinite_gen():  # TODO : apply cse and then hashing on subexpr as its identifier, to optimise caching
+            i = 0
+            while True:
+                yield symbols(f"__symkit_{i}")
+                i += 1
+
+        if self.elimination:
+            common_exprs, exprs = cse(population, order="none", symbols=infinite_gen())
+            # iteratively, because cse uses freshly discovered symbols to expression new ones
+            for (sym, expr,) in common_exprs:
+                X.loc[:, str(sym)] = self._execute(expr, X)
+            preds = {
+                orig_expr: self._execute(dest_expr, X)
+                for orig_expr, dest_expr in zip(population, exprs)
+            }
+        else:
+            preds = {expr: self._execute(expr, X) for expr in population}
+        fitness = {expr: score(y, y_pred, expr) for expr, y_pred in preds.items()}
+        return pd.Series(fitness)
 
     def predict(self, X, expr=None):
         if expr is None:
@@ -228,19 +255,15 @@ class SymbolicRegression(BaseEstimator, RegressorMixin):
             syms = getattr(self, "symbols_") or symbols(f"X:{X.shape[1]}")
             cols = map(str, syms)
             X = pd.DataFrame(data=X, columns=cols)
-        y_pred = _execute(expr, X, engine=self.engine)
+        y_pred = _execute(expr, X, modules=self.modules)  # no cache here
         return y_pred
 
     # TODO predict_proba from (mean) sigmoid from self.expression | self.hall_of_fame
 
     def score(self, X, y, expr=None):
-        from sklearn.metrics import r2_score
-
         if expr is None:
             expr = getattr(self, "expression_", None)
         if expr is None:
             raise NotFittedError()
-        if complexity(expr) > 10:
-            return -np.inf
         y_pred = self.predict(X, expr=expr)
         return r2_score(y, y_pred)
