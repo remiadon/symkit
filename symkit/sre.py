@@ -3,6 +3,7 @@ from functools import partial
 from typing import AnyStr, List
 
 import joblib
+import numexpr  # just to early raise an error, before calling lambdify
 import numpy as np
 import pandas as pd
 from sklearn.base import BaseEstimator, RegressorMixin
@@ -12,62 +13,69 @@ from sklearn.utils import check_array, check_X_y
 from sklearn.utils.validation import check_random_state
 
 # from joblib.parallel import delayed
-from sympy import Expr, symbols
+from sympy import Expr, Function, symbols
 from sympy.core.symbol import Symbol
 
+from .core import symbol_generator
 from .expression import (
     add2,
     complexity,
     crossover,
     div2,
-    get_symbols,
     hoist_mutation,
     mul2,
-    pdiv,
     random_expr,
     sub2,
     subtree_mutation,
 )
 
 
-# TODO : joblib.cache this function
-def _execute(expr: Expr, X: pd.DataFrame, modules="numpy"):
+def _execute(expr: Expr, X: dict, symbol_gen):
     from sympy import lambdify, nan, oo, zoo
 
+    n_samples = max(map(len, X.values()))
     if expr.has(oo, -oo, zoo, nan):
-        return np.zeros(len(X), dtype=float)  # TODO log this
+        return np.zeros(n_samples, dtype=float)  # TODO log this
     if expr.is_number:
-        return np.repeat(float(expr), len(X)).astype(float)
+        return np.repeat(float(expr), n_samples).astype(float)
 
-    syms = [str(_) for _ in get_symbols(expr)]
-    args = X[syms].values.T
-    fn = lambdify(syms, expr, modules)
-    res = fn(*args)
+    if expr.is_Function:  # user defined function, bypass numexpr
+        # recursive calls to still rely on numexpr in subexpressions
+        _args = list()
+        for _ in expr.args:
+            _args.append(_execute(_, X, symbol_gen))
+        return expr._numpy_(*_args)  # eg. protected div
 
-    if np.isnan(res).any():  # FIXME this happened with expr=X9**(-X10)
-        return np.zeros(len(X), dtype=float)
+    syms = sorted(expr.free_symbols, key=str)
+    _args = [X[_] for _ in syms]
 
-    if ((res == np.inf) | (res == -np.inf)).any():  # TODO this also happens with **
-        return np.zeros(len(X), dtype=float)
+    user_defined = expr.find(Function)
+    if user_defined:
+        _args = list(_args)
+        replace_dict = dict()
+        for _ in user_defined:
+            _args.append(_execute(_, X, symbol_gen))
+            var = next(symbol_gen)
+            replace_dict[_] = var
+            syms.append(var)
+        expr = expr.subs(replace_dict)
+
+    if expr.is_Pow:  # FIXME : this makes numexpr fail, but not numpy
+        fn = lambdify(syms, expr, "numpy")
+    else:
+        fn = lambdify(syms, expr, "numexpr")
+
+    res = fn(*_args)
+
+    nans = np.isnan(res) | (res == np.inf) | (res == -np.inf)
+    if nans.any():  # FIXME this happened with expr=X9**(-X10)
+        res[nans] = 10_000_000  # arbitrary high value
 
     return res
 
 
 def score(y, y_pred, expr):
-    return r2_score(y, y_pred) - complexity(expr) / 100
-
-
-def pick(size_getter, target_size, pool, limit=1_000, **kwargs):
-    n_try = 0
-    while size_getter() < target_size:
-        choices = random.choices(pool, **kwargs)
-        if len(choices) == 1:
-            yield choices[0]
-        else:
-            yield choices
-        n_try += 1
-        if n_try > limit:
-            break
+    return r2_score(y, y_pred)  # - complexity(expr) / 100
 
 
 class SymbolicRegression(BaseEstimator, RegressorMixin):
@@ -75,49 +83,46 @@ class SymbolicRegression(BaseEstimator, RegressorMixin):
         self,
         operators: List[Expr] = [add2, sub2, mul2, div2],
         population_size: int = None,
-        init_size: int = None,
         n_iter: int = 100,
         n_iter_no_change: int = 10,
         selection_ratio=0.5,
         ratios=dict(
             reproduction=0.4, crossover=0.2, subtree_mutation=0.2, hoist_mutation=0.2
         ),
-        memory=joblib.Memory(location=None),
-        modules: AnyStr = [
-            "numpy",
-            dict(pdiv=pdiv),
-        ],  # TODO : protected division with Piecewise
         random_state=12,
-        elimination=False,  # TODO make this work
     ):
         self.population_size = population_size
-        self.init_size = init_size
         self.n_iter = n_iter
         self.n_iter_no_change = n_iter_no_change
         self.operators = operators
         self.selection_ratio = selection_ratio
         assert isinstance(ratios, dict) and sum(ratios.values()) == 1.0
         self.ratios = ratios
-        self.memory = memory
         self.random_state = random_state
-        self.elimination = elimination
-        self.modules = modules
+
+    def _check_input(self, X, y=None, return_symbols=False):
+        if not isinstance(X, pd.DataFrame):
+            if y is not None:
+                X, y = check_X_y(X, y)  # TODO : check parameter setting for `check_X_y`
+            else:
+                X = check_array(X)
+            syms = symbols(f"X:{X.shape[1]}")
+            values = X
+        else:
+            syms = X.columns.map(Symbol)
+            values = X.values
+        X = dict(zip(syms, values.T))
+        if return_symbols:
+            return X, y, syms
+        return X, y
 
     def fit(self, X, y):
+        X, y, syms = self._check_input(X, y, return_symbols=True)
         random_state = check_random_state(self.random_state)
-        if not isinstance(X, pd.DataFrame):
-            X, y = check_X_y(X, y)  # TODO : check parameter setting for `check_X_y`
-            X = pd.DataFrame(data=X, columns=map(str, symbols(f"X:{X.shape[1]}")))
-
-        # FIXME we should not mutate data, see `X.loc[:, ...] = ...` in self.evaluate_population
-        self._execute = self.memory.cache(
-            partial(_execute, modules=self.modules), ignore=["X"]
-        )
 
         history = list()
-        syms = symbols(X.columns.tolist())
-        init_size = self.init_size or max(len(syms), len(self.operators))
         population_size = self.population_size or len(self.operators) ** 2
+        init_size = 2
 
         reproduction_size = int(population_size * self.ratios["reproduction"])
         subtree_mutation_size = int(population_size * self.ratios["subtree_mutation"])
@@ -157,29 +162,30 @@ class SymbolicRegression(BaseEstimator, RegressorMixin):
             population = set(reproduction.index)  # start with those who reproduce
 
             # HOIST MUTATIONS
-            target_size = reproduction_size + hoist_mutation_size
-            for expr in pick(population.__len__, target_size, reproduction.index):
+            for expr in random_state.choice(
+                reproduction.index, size=hoist_mutation_size, replace=False
+            ):
                 hoisted = hoist_mutation(expr, random_state=random_state)
                 population.add(hoisted)
 
             # SUBTREE MUTATIONS
-            target_size += subtree_mutation_size
-            for expr in pick(population.__len__, target_size, reproduction.index):
+            for expr in random_state.choice(
+                reproduction.index, size=subtree_mutation_size, replace=False
+            ):
                 n_symbols = expr.count(Symbol)
-                mutation_size = np.ceil(np.log(n_symbols))
+                mutation_size = np.ceil(np.log(n_symbols)) if n_symbols else init_size
                 subtree_mutant = subtree_mutation(
                     expr,
                     self.operators,
                     syms,
-                    size=mutation_size,
+                    size=mutation_size,  # TODO : auto set size inside subtree_mutation function
                     random_state=random_state,
                 )
                 population.add(subtree_mutant)
 
             # CROSSOVERS
-            target_size += crossover_size
-            for expr1, expr2 in pick(
-                population.__len__, target_size, reproduction.index, k=2
+            for expr1, expr2 in random_state.choice(
+                reproduction.index, size=(crossover_size, 2)
             ):
                 child = crossover(expr1, expr2, random_state=random_state)
                 population.add(child)
@@ -219,51 +225,21 @@ class SymbolicRegression(BaseEstimator, RegressorMixin):
         This version tries to identify subexpressions, in order to mutualise
         pre-computed results.
         """
-        # TODO
-        # 1. cache calls to _execute
-
-        # TODO parallel execution
-        from sympy import cse
-
-        def infinite_gen():  # TODO : apply cse and then hashing on subexpr as its identifier, to optimise caching
-            i = 0
-            while True:
-                yield symbols(f"__symkit_{i}")
-                i += 1
-
-        if self.elimination:
-            common_exprs, exprs = cse(population, order="none", symbols=infinite_gen())
-            # iteratively, because cse uses freshly discovered symbols to expression new ones
-            for (sym, expr,) in common_exprs:
-                X.loc[:, str(sym)] = self._execute(expr, X)
-            preds = {
-                orig_expr: self._execute(dest_expr, X)
-                for orig_expr, dest_expr in zip(population, exprs)
-            }
-        else:
-            preds = {expr: self._execute(expr, X) for expr in population}
+        sym_gen = symbol_generator()
+        preds = {expr: _execute(expr, X, sym_gen) for expr in population}
         fitness = {expr: score(y, y_pred, expr) for expr, y_pred in preds.items()}
         return pd.Series(fitness)
 
-    def predict(self, X, expr=None):
-        if expr is None:
-            expr = getattr(self, "expression_", None)
+    def predict(self, X):
+        expr = getattr(self, "expression_", None)
         if expr is None:
             raise NotFittedError()
-        if not isinstance(X, pd.DataFrame):
-            X = check_array(X)
-            syms = getattr(self, "symbols_") or symbols(f"X:{X.shape[1]}")
-            cols = map(str, syms)
-            X = pd.DataFrame(data=X, columns=cols)
-        y_pred = _execute(expr, X, modules=self.modules)  # no cache here
+        X, _ = self._check_input(X, y=None)
+        y_pred = _execute(expr, X, symbol_gen=symbol_generator())
         return y_pred
 
     # TODO predict_proba from (mean) sigmoid from self.expression | self.hall_of_fame
 
-    def score(self, X, y, expr=None):
-        if expr is None:
-            expr = getattr(self, "expression_", None)
-        if expr is None:
-            raise NotFittedError()
-        y_pred = self.predict(X, expr=expr)
+    def score(self, X, y):
+        y_pred = self.predict(X)
         return r2_score(y, y_pred)

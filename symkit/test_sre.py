@@ -1,3 +1,4 @@
+import numpy.testing
 import pandas as pd
 import pytest
 from sympy import Symbol
@@ -62,14 +63,30 @@ def test_score(expr, score, body_mass_index):
     assert sc == pytest.approx(score, 0.05)
 
 
-@pytest.mark.parametrize("elimination", [True, False])
-def test_evaluate_population(
-    body_mass_index, body_mass_candidate_expressions, elimination
-):
+def test_execute(body_mass_index):
+    from sympy.abc import x, y
+    from sympy.utilities.iterables import numbered_symbols
+
+    from .expression import pdiv
+
+    X, _ = body_mass_index
+    X.columns = X.columns.map(Symbol)
+    x, y = X.columns.tolist()
+    X = X.to_dict(orient="list")
+    expr = pdiv(x, y * 3) + (x + 2) * (y - 10)
+    res = _execute(expr, X, numbered_symbols())
+    numpy.testing.assert_almost_equal(
+        res, [226.80847619, 237.25733333, 291.08709302, 229.40787037], decimal=8
+    )
+
+
+# @pytest.mark.parametrize("elimination", [True, False])
+def test_evaluate_population(body_mass_index, body_mass_candidate_expressions):
     population = [parse_expr(e) for e in body_mass_candidate_expressions]
-    sre = SymbolicRegression(elimination=elimination)
-    sre._execute = _execute  # sklearn prohibits setting attributes at init time
+    sre = SymbolicRegression()
     X, y = body_mass_index
+    X.columns = X.columns.map(Symbol)
+    X = X.to_dict(orient="list")
     fitness = sre.evaluate_population(population, X, y)
     pd.testing.assert_series_equal(
         fitness,
@@ -83,7 +100,7 @@ def test_evaluate_population(
 
 def test_fit(body_mass_index):
     X, y = body_mass_index
-    sre = SymbolicRegression(n_iter=10, population_size=100)
+    sre = SymbolicRegression(n_iter=10, population_size=5, random_state=12)
     sre.fit(X, y)
     assert sre.expression_
     assert sre.hall_of_fame_[sre.expression_] == pytest.approx(1.0, 0.1)

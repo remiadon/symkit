@@ -1,45 +1,36 @@
-import random
 from math import ceil, floor
 
 import numpy as np
+from sklearn.utils import check_random_state
 from sympy import Abs, Function, Piecewise, S, Symbol, preorder_traversal, symbols
 from sympy.abc import x, y
-from sympy.printing.lambdarepr import NumExprPrinter
-from sympy.utilities.lambdify import lambdastr
 
-# TODO : replace by sympy.Add, sympy.Sub and sympy.Mul
-add2 = x + y
-sub2 = x - y
-mul2 = x * y
-div2 = Piecewise((x / y, Abs(y) > 0.001), (1.0, True))
-
-from sklearn.utils import check_random_state
-
-DEFAULT_STATE = check_random_state(23)
+_STATE = check_random_state(23)
 
 
 class pdiv(Function):
     @classmethod
     def eval(cls, x, y):
-        _len = (
-            len(x)
-            if hasattr(x, "__len__")
-            else len(y)
-            if hasattr(y, "__len__")
-            else None
-        )
-        if _len is not None:
-            x, y = np.array(x, dtype=float), np.array(y, dtype=float)
-            oks = np.abs(y) > 0.001
-            ones = np.ones(_len, dtype=float)
-            return np.divide(x, y, out=ones, where=oks)
         if y.is_real:
             if Abs(y) > 0.001:
                 return x / y
             else:
                 return S.One
+        if x == y:
+            return S.One
+        if x == S.Zero:
+            return x
+
+    def _numpy_(self, x, y):
+        _len = getattr(x, "__len__", None) or getattr(y, "__len__", None)
+        oks = np.abs(y) > 0.001
+        ones = np.ones(_len(), dtype=float) if _len else None
+        return np.divide(x, y, out=ones, where=oks)
 
 
+add2 = x + y
+sub2 = x - y
+mul2 = x * y
 div2 = pdiv(x, y)
 
 DEFAULT_OPS = [
@@ -50,10 +41,6 @@ DEFAULT_OPS = [
 ]
 
 
-def get_symbols(expr):
-    return sorted(expr.atoms(Symbol), key=str)
-
-
 def is_function(expr):
     from sympy import Function
     from sympy.core.operations import AssocOp
@@ -61,7 +48,7 @@ def is_function(expr):
     return isinstance(expr, (Function, AssocOp))
 
 
-def get_subtree(expr, start=0, random_state=DEFAULT_STATE):
+def get_subtree(expr, start=0, random_state=_STATE):
     picks = list(preorder_traversal(expr))[start:]
     if not picks:
         return S.Zero
@@ -70,9 +57,7 @@ def get_subtree(expr, start=0, random_state=DEFAULT_STATE):
     return random_state.choice(picks, p=probs)
 
 
-def random_expr(
-    ops=DEFAULT_OPS, syms=symbols("X:10"), size=10, random_state=DEFAULT_STATE
-):
+def random_expr(ops, syms=symbols("X:10"), size=10, random_state=_STATE):
     if size <= 1:
         return random_state.choice(syms)
     op = random_state.choice(ops)
@@ -82,22 +67,18 @@ def random_expr(
     return op.subs([(x, left), (y, right)], evaluate=True)
 
 
-def hoist_mutation(expr, **kwargs):
+def hoist_mutation(expr, evaluate=False, **kwargs):
     to_replace = get_subtree(
         expr, start=1, **kwargs
     )  # start at 1 to avoid taking the root
     sub = get_subtree(to_replace, start=1, **kwargs)
-    return expr.subs(to_replace, sub, evaluate=True)
+    return expr.subs(to_replace, sub, evaluate=evaluate)
 
 
-def subtree_mutation(
-    expr, ops, syms=None, size=2, evaluate=True, random_state=DEFAULT_STATE
-):
+def subtree_mutation(expr, ops, syms, size=2, evaluate=True, random_state=_STATE):
     if not expr or not expr.args:
         return random_expr(ops, syms, size=size, random_state=random_state)
     to_replace = random_state.choice(expr.args)
-    if syms is None:
-        syms = get_symbols(expr)
     new_expr = random_expr(ops, syms, size=size, random_state=random_state)
     return expr.subs(to_replace, new_expr, evaluate=evaluate)
 

@@ -3,12 +3,21 @@ from sklearn.utils import check_random_state
 from sympy.core.symbol import Symbol
 from sympy.parsing.sympy_parser import parse_expr
 
-from .expression import complexity, crossover, hoist_mutation, random_expr
+from .expression import (
+    add2,
+    complexity,
+    crossover,
+    div2,
+    hoist_mutation,
+    mul2,
+    random_expr,
+    sub2,
+)
 
 
 @pytest.mark.parametrize("size", (2, 5, 10))
 def test_random_expression(size):
-    expr = random_expr(size=size)
+    expr = random_expr(size=size, ops=[add2, sub2, div2, mul2])
     assert expr.count(Symbol) <= size
 
 
