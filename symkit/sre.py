@@ -212,7 +212,6 @@ class SymbolicRegression(BaseEstimator, RegressorMixin):
                     check_regressors_int="",
                     check_fit_idempotent="",
                     check_fit2d_1sample="",
-                    check_no_attributes_set_in_init="need to set self.execute_ at init time",
                 ),
                 X_types=["2darray"],  # TODO : add more dtypes, this should be doable
             ),
