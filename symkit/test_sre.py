@@ -67,7 +67,7 @@ def test_execute(body_mass_index):
     from sympy.abc import x, y
     from sympy.utilities.iterables import numbered_symbols
 
-    from .expression import pdiv
+    from .operators import pdiv
 
     X, _ = body_mass_index
     X.columns = X.columns.map(Symbol)
@@ -99,9 +99,17 @@ def test_evaluate_population(body_mass_index, body_mass_candidate_expressions):
 
 
 def test_fit(body_mass_index):
+    from .operators import add2, div2, mul2, sub2
+
     X, y = body_mass_index
-    sre = SymbolicRegression(n_iter=10, population_size=5, random_state=12)
+    sre = SymbolicRegression(
+        n_iter=10,
+        population_size=50,
+        random_state=12,
+        operators=[add2, sub2, div2, mul2],
+        init_size=(2, 6),
+    )
     sre.fit(X, y)
     assert sre.expression_
-    assert sre.hall_of_fame_[sre.expression_] == pytest.approx(1.0, 0.1)
+    assert sre.score(X, y) == pytest.approx(1.0, 0.1)
     assert complexity(sre.expression_) < 10

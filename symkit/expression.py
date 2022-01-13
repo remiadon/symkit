@@ -1,44 +1,12 @@
-from math import ceil, floor
+from functools import partial
 
 import numpy as np
+from scipy.sparse.construct import rand
 from sklearn.utils import check_random_state
-from sympy import Abs, Function, Piecewise, S, Symbol, preorder_traversal, symbols
-from sympy.abc import x, y
+from sympy import Piecewise, S, Symbol, preorder_traversal, symbols
+from sympy.core.parameters import evaluate
 
 _STATE = check_random_state(23)
-
-
-class pdiv(Function):
-    @classmethod
-    def eval(cls, x, y):
-        if y.is_real:
-            if Abs(y) > 0.001:
-                return x / y
-            else:
-                return S.One
-        if x == y:
-            return S.One
-        if x == S.Zero:
-            return x
-
-    def _numpy_(self, x, y):
-        _len = getattr(x, "__len__", None) or getattr(y, "__len__", None)
-        oks = np.abs(y) > 0.001
-        ones = np.ones(_len(), dtype=float) if _len else None
-        return np.divide(x, y, out=ones, where=oks)
-
-
-add2 = x + y
-sub2 = x - y
-mul2 = x * y
-div2 = pdiv(x, y)
-
-DEFAULT_OPS = [
-    add2,
-    sub2,
-    mul2,
-    div2,
-]
 
 
 def is_function(expr):
@@ -57,14 +25,35 @@ def get_subtree(expr, start=0, random_state=_STATE):
     return random_state.choice(picks, p=probs)
 
 
-def random_expr(ops, syms=symbols("X:10"), size=10, random_state=_STATE):
-    if size <= 1:
+def random_expr_full(ops, syms, size, random_state):
+    ops = list({_ for _ in ops if _.count(Symbol) < size})
+    if size <= 1 or not ops:
         return random_state.choice(syms)
     op = random_state.choice(ops)
-    left_size, right_size = floor(size / 2), ceil(size / 2)
-    left = random_expr(ops, syms, size=left_size, random_state=random_state)
-    right = random_expr(ops, syms, size=right_size, random_state=random_state)
-    return op.subs([(x, left), (y, right)], evaluate=True)
+    orig_syms = list(op.free_symbols)
+    subs = list()
+    d, remained = divmod(size - 1, len(orig_syms))
+    for orig_sym in orig_syms:
+        _size = d + remained if orig_sym == orig_syms[-1] else d
+        sub_expr = random_expr_full(ops, syms, _size, random_state)
+        subs.append((orig_sym, sub_expr))
+    return op.subs(subs)
+
+
+def random_expr_grow(ops, syms, size, random_state):
+    expr = random_state.choice(syms)
+    _size = 1
+    ops = [_ for _ in ops if _.count(Symbol) <= size - _size]
+    while _size <= size and ops:
+        p = np.array([_.count(Symbol) ** 2 for _ in ops])
+        p = p / p.sum()
+        op = random_state.choice(ops, p=p)
+        _syms = random_state.choice(syms, size=op.count(Symbol) - 1)
+        args = [expr] + _syms.tolist()
+        expr = type(op)(*args)
+        _size = complexity(expr)  # expansive but only way to control simplifications
+        ops = [_ for _ in ops if _.count(Symbol) <= size - _size]
+    return expr
 
 
 def hoist_mutation(expr, evaluate=False, **kwargs):
@@ -75,30 +64,40 @@ def hoist_mutation(expr, evaluate=False, **kwargs):
     return expr.subs(to_replace, sub, evaluate=evaluate)
 
 
-def subtree_mutation(expr, ops, syms, size=2, evaluate=True, random_state=_STATE):
+def subtree_mutation(expr, ops, syms, evaluate=True, random_state=_STATE):
     if not expr or not expr.args:
-        return random_expr(ops, syms, size=size, random_state=random_state)
+        return random_state.choice(syms)
     to_replace = random_state.choice(expr.args)
-    new_expr = random_expr(ops, syms, size=size, random_state=random_state)
+    size = complexity(to_replace)
+    if random_state.choice([0, 1]):
+        random_meth = random_expr_full
+    else:
+        random_meth = random_expr_grow
+    new_expr = random_meth(ops, syms, size=size, random_state=random_state)
     return expr.subs(to_replace, new_expr, evaluate=evaluate)
 
 
-def crossover(expr1, expr2, evaluate=False, **kwargs):
+def crossover(donor, receiver, random_state):
     """
-    split_point is the point where we split a nformulae
-    a value of 0.5(default) will take the left part of expr1,
-    and join it with left part of expr2
     """
-    to_replace = get_subtree(expr1, **kwargs)
-    return expr1.subs(to_replace, expr2, evaluate=evaluate)
+    to_replace = get_subtree(receiver, start=1, random_state=random_state)
+    replace = get_subtree(donor, start=0, random_state=random_state)
+    return receiver.subs(to_replace, replace)
 
 
-def arity(expr):
+def arity(expr):  # TODO : see sympy.function.arity
     return len(expr.find(lambda e: e.is_symbol))
 
 
 def complexity(expr, complexity_map={Piecewise: lambda e: e.args[0].args[0]}):
     for op_type, accessor in complexity_map.items():  # TODO avoid substitution
         founds = expr.find(op_type)
-        expr = expr.subs(zip(founds, map(accessor, founds)))
-    return sum((1 for _ in preorder_traversal(expr)))
+        if founds:
+            expr = expr.subs(zip(founds, map(accessor, founds)))
+    ctr = 0
+    for _ in preorder_traversal(expr):
+        if is_function(_) and _.args[0] == -1:
+            ctr -= 1
+            continue
+        ctr += 1
+    return ctr

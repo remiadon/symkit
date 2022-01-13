@@ -1,37 +1,52 @@
 import pytest
 from sklearn.utils import check_random_state
+from sympy import symbols
 from sympy.core.symbol import Symbol
 from sympy.parsing.sympy_parser import parse_expr
 
 from .expression import (
-    add2,
     complexity,
     crossover,
-    div2,
     hoist_mutation,
-    mul2,
-    random_expr,
-    sub2,
+    random_expr_full,
+    random_expr_grow,
 )
+from .operators import add2, cos1, div2, mul2, sin1, sub2
+
+syms = symbols("X:10")
 
 
-@pytest.mark.parametrize("size", (2, 5, 10))
-def test_random_expression(size):
-    expr = random_expr(size=size, ops=[add2, sub2, div2, mul2])
-    assert expr.count(Symbol) <= size
+@pytest.mark.parametrize("size", (2, 5, 10, 20))
+def test_random_expression_full(size):
+    random_state = check_random_state(None)
+    ops = [add2, sub2, div2, mul2, sin1, cos1]
+    expr = random_expr_full(ops, syms, size, random_state)
+    assert complexity(expr) == pytest.approx(size, rel=0.2)
+
+
+@pytest.mark.parametrize("size", (2, 5, 10, 20))
+def test_random_expression_grow(size):
+    random_state = check_random_state(None)
+    ops = [add2, sub2, div2, mul2, sin1, cos1]
+    expr = random_expr_grow(ops, syms, size, random_state)
+    assert complexity(expr) == size
+    assert expr.count(Symbol) == pytest.approx(size / 2, rel=0.2)
 
 
 @pytest.mark.parametrize(
     "expr1,expr2,result",
     [
-        ("X0 * 2", "X6", "X0 * X6"),
-        ("X0 * 3 + X2", "(X3 - X1) * (X4 + 2)", "X2 + (-X1 + X3) * (X4 + 2)"),
+        ("X0 * 2", "X6", "X6"),
+        ("X6", "X0 * X2", "X0 * X6"),  # non commutative
+        ("X0 * 3 + X2", "(X3 - X1) * (X4 + 2)", "3 * X0 * (X4 + 2)"),
+        ("Mul(a, b, c)", "(a / (b - 4)) * (c + d)", "(a * b) / (b - 4)"),
     ],
 )
 def test_crossover(expr1, expr2, result):
+    random_state = check_random_state(20)
     expr1 = parse_expr(expr1)
     expr2 = parse_expr(expr2)
-    child = crossover(expr1, expr2, random_state=check_random_state(8))
+    child = crossover(expr1, expr2, random_state=random_state)
     assert child == parse_expr(result)
 
 
@@ -40,6 +55,7 @@ def test_crossover(expr1, expr2, result):
     [
         ("X0 * 2", 3),
         ("Piecewise((height/weight, 2*Abs(weight) > 0.001), (1.0, True))", 5),
+        ("X0 * 5 - X1", 5),  # make sure `-X1` does not account for (+ -1 * ...)
     ],
 )
 def test_complexity(expr, complexity_mesure):
