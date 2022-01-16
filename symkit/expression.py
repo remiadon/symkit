@@ -1,10 +1,6 @@
-from functools import partial
-
 import numpy as np
-from scipy.sparse.construct import rand
 from sklearn.utils import check_random_state
-from sympy import Piecewise, S, Symbol, preorder_traversal, symbols
-from sympy.core.parameters import evaluate
+from sympy import S, Symbol, preorder_traversal
 
 _STATE = check_random_state(23)
 
@@ -40,6 +36,29 @@ def random_expr_full(ops, syms, size, random_state):
     return op.subs(subs)
 
 
+"""
+def random_expr_full(ops, syms, size, random_state):
+    ops = list({_ for _ in ops if _.count(Symbol) < size})
+    if not ops:
+        return random_state.choice(syms)
+    expr = random_state.choice(ops)
+    _size = size - complexity(expr)
+    _syms = expr.find(Symbol)
+    while _size > 0 and _syms:
+        ops = list({_ for _ in ops if _.count(Symbol) <= _size // len(_syms)})
+        if not ops:
+            break
+        sub_exprs = random_state.choice(ops, size=len(_syms))
+        expr = expr.subs(zip(_syms, sub_exprs))
+        _size = size - complexity(expr)  # costly but handle simplifications
+        _syms = expr.find(Symbol)
+
+    replace = random_state.choice(syms, size=expr.count(Symbol))
+    expr = expr.subs(zip(_syms, replace))
+    return expr
+"""
+
+
 def random_expr_grow(ops, syms, size, random_state):
     expr = random_state.choice(syms)
     _size = 1
@@ -56,15 +75,15 @@ def random_expr_grow(ops, syms, size, random_state):
     return expr
 
 
-def hoist_mutation(expr, evaluate=False, **kwargs):
+def hoist_mutation(expr, **kwargs):
     to_replace = get_subtree(
         expr, start=1, **kwargs
     )  # start at 1 to avoid taking the root
     sub = get_subtree(to_replace, start=1, **kwargs)
-    return expr.subs(to_replace, sub, evaluate=evaluate)
+    return expr.subs(to_replace, sub)
 
 
-def subtree_mutation(expr, ops, syms, evaluate=True, random_state=_STATE):
+def subtree_mutation(expr, ops, syms, random_state=_STATE):
     if not expr or not expr.args:
         return random_state.choice(syms)
     to_replace = random_state.choice(expr.args)
@@ -74,7 +93,7 @@ def subtree_mutation(expr, ops, syms, evaluate=True, random_state=_STATE):
     else:
         random_meth = random_expr_grow
     new_expr = random_meth(ops, syms, size=size, random_state=random_state)
-    return expr.subs(to_replace, new_expr, evaluate=evaluate)
+    return expr.subs(to_replace, new_expr)
 
 
 def crossover(donor, receiver, random_state):
@@ -89,11 +108,7 @@ def arity(expr):  # TODO : see sympy.function.arity
     return len(expr.find(lambda e: e.is_symbol))
 
 
-def complexity(expr, complexity_map={Piecewise: lambda e: e.args[0].args[0]}):
-    for op_type, accessor in complexity_map.items():  # TODO avoid substitution
-        founds = expr.find(op_type)
-        if founds:
-            expr = expr.subs(zip(founds, map(accessor, founds)))
+def complexity(expr):
     ctr = 0
     for _ in preorder_traversal(expr):
         if is_function(_) and _.args[0] == -1:
