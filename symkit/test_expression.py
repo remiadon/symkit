@@ -54,7 +54,7 @@ def test_crossover(expr1, expr2, result):
     "expr, complexity_mesure",
     [
         ("X0 * 2", 3),
-        ("Piecewise((height/weight, 2*Abs(weight) > 0.001), (1.0, True))", 5),
+        ("Piecewise((height/weight, 2*Abs(weight) > 0.001), (1.0, True))", 16),
         ("X0 * 5 - X1", 5),  # make sure `-X1` does not account for (+ -1 * ...)
     ],
 )

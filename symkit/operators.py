@@ -20,6 +20,19 @@ class pdiv(UserDefinedFunction):
             return S.One
         if x == S.Zero:
             return x
+        if y.is_Mul and x in y.args:  # eg. pdiv(a, a * b) -> pdiv(1, b)
+            return pdiv(1, y / x)
+
+        if isinstance(x, pdiv) and isinstance(y, pdiv):
+            a, b = x.args
+            c, d = y.args
+            return pdiv(a * d, b * c)
+        if isinstance(x, pdiv):
+            a, b = x.args
+            return pdiv(a, y * b)
+        if isinstance(y, pdiv):
+            a, b = y.args
+            return pdiv(x * b, a)
 
     def vectorized_fn(self, x, y):
         _len = getattr(x, "__len__", None) or getattr(y, "__len__", None)
