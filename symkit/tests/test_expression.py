@@ -4,14 +4,14 @@ from sympy import symbols
 from sympy.core.symbol import Symbol
 from sympy.parsing.sympy_parser import parse_expr
 
-from .expression import (
+from ..expression import (
     complexity,
     crossover,
     hoist_mutation,
     random_expr_full,
     random_expr_grow,
 )
-from .operators import add2, cos1, div2, mul2, sin1, sub2
+from ..operators import add2, cos1, div2, mul2, sin1, sub2
 
 syms = symbols("X:10")
 

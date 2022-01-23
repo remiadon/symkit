@@ -3,7 +3,7 @@ import pytest
 from sympy import symbols
 from sympy.abc import x, y
 
-from .operators import pdiv
+from ..operators import pdiv
 
 a, b, c, d = symbols("a b c d")
 

@@ -3,7 +3,7 @@ import itertools
 import pandas as pd
 import pytest
 
-from .online_sre import OnlineSymbolicRegression
+from ..online_sre import OnlineSymbolicRegression
 
 
 @pytest.fixture

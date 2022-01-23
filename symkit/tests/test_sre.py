@@ -7,8 +7,8 @@ import pytest
 from sympy import Symbol
 from sympy.parsing.sympy_parser import parse_expr
 
-from .expression import complexity
-from .sre import SymbolicRegression, _execute_udf
+from ..expression import complexity
+from ..sre import SymbolicRegression, _execute_udf
 
 
 @pytest.fixture
