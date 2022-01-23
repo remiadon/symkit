@@ -22,6 +22,8 @@ class pdiv(UserDefinedFunction):
             return x
         if y.is_Mul and x in y.args:  # eg. pdiv(a, a * b) -> pdiv(1, b)
             return pdiv(1, y / x)
+        if x.is_Mul and y in x.args:  # eg. pdiv(4 * a, a) --> 4
+            return x / y
 
         if isinstance(x, pdiv) and isinstance(y, pdiv):
             a, b = x.args
@@ -35,9 +37,14 @@ class pdiv(UserDefinedFunction):
             return pdiv(x * b, a)
 
     def vectorized_fn(self, x, y):
-        _len = getattr(x, "__len__", None) or getattr(y, "__len__", None)
+        x = np.asfarray(x).reshape(-1)
+        y = np.asfarray(y).reshape(-1)
         oks = np.abs(y) > 0.001
-        ones = np.ones(_len(), dtype=float) if _len else None
+        ones = np.ones_like(x) if len(x) > len(y) else np.ones_like(y)
+        if oks is False:
+            return ones
+        elif oks is True:
+            oks = None
         return np.divide(x, y, out=ones, where=oks)
 
 
@@ -54,7 +61,7 @@ class plog(UserDefinedFunction):
                 return S.Zero
         if x.is_Pow:  # log(M ** k) = k * log(M)
             #  see https://github.com/sympy/sympy/issues/13781
-            return x.args[1] * log(x.args[0])
+            return x.args[1] * plog(x.args[0])
 
     def vectorized_fn(self, x):
         _len = getattr(x, "__len__", None)
