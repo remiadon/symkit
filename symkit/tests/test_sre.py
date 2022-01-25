@@ -1,6 +1,3 @@
-from cmath import exp
-from textwrap import wrap
-
 import numpy.testing
 import pandas as pd
 import pytest
@@ -55,7 +52,7 @@ def test_execute(body_mass_index):
     from sympy.abc import x, y
     from sympy.utilities.iterables import numbered_symbols
 
-    from .operators import pdiv
+    from ..operators import pdiv
 
     X, _ = body_mass_index
     X.columns = X.columns.map(Symbol)
@@ -82,13 +79,15 @@ def test_evaluate_population(body_mass_index, body_mass_candidate_expressions):
     assert evaluated_syms == orig_syms
 
 
-def test_fit(body_mass_index):
-    from .operators import add2, div2, mul2, sub2
+@pytest.mark.parametrize("n_iter", [5, 10])
+@pytest.mark.parametrize("population_size", [20, 50])
+def test_fit(body_mass_index, n_iter, population_size):
+    from ..operators import add2, div2, mul2, sub2
 
     X, y = body_mass_index
     sre = SymbolicRegression(
-        n_iter=10,
-        population_size=50,
+        n_iter=n_iter,
+        population_size=population_size,
         random_state=12,
         operators=[add2, sub2, div2, mul2],
         init_size=(2, 6),
@@ -97,3 +96,4 @@ def test_fit(body_mass_index):
     assert sre.expression_
     assert sre.score(X, y) == pytest.approx(1.0, 0.1)
     assert complexity(sre.expression_) < 10
+    assert sre.hall_of_fame_.shape[0] == population_size

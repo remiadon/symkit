@@ -2,6 +2,7 @@ from typing import List, Mapping
 
 import numpy as np
 import pandas as pd
+from river.utils import Skyline
 from sklearn.base import BaseEstimator, RegressorMixin
 from sklearn.exceptions import NotFittedError
 from sklearn.metrics import mean_squared_error, r2_score
@@ -86,12 +87,11 @@ class SymbolicRegression(BaseEstimator, RegressorMixin):
         self,
         operators: List[Expr] = (add2, sub2, mul2, div2),
         population_size: int = 100,
-        n_iter: int = 100,
-        n_iter_no_change: int = 10,
+        n_iter: int = 20,
+        n_iter_no_change: int = None,
         init_size=(2, 8),
         crossover_ratio=0.4,
         subtree_mutation_ratio=0.3,
-        hoist_mutation_ratio=0.2,
         random_state=12,
     ):
         assert population_size
@@ -101,12 +101,10 @@ class SymbolicRegression(BaseEstimator, RegressorMixin):
         self.operators = operators
         assert isinstance(init_size, tuple) and len(init_size) == 2
         self.init_size = init_size
-        assert (
-            sum((crossover_ratio, subtree_mutation_ratio, hoist_mutation_ratio)) < 0.9
-        )
+        assert sum((crossover_ratio, subtree_mutation_ratio)) < 0.9
         self.crossover_ratio = crossover_ratio
         self.subtree_mutation_ratio = subtree_mutation_ratio
-        self.hoist_mutation_ratio = hoist_mutation_ratio
+        # self.hoist_mutation_ratio = hoist_mutation_ratio
         self.random_state = random_state
 
     def _check_input(self, X, y=None):
@@ -164,33 +162,46 @@ class SymbolicRegression(BaseEstimator, RegressorMixin):
     def _fit(self, X, y, population, syms, random_state):
         history = list()
 
+        # paretoset kept up to date
+        pareto_archive = Skyline(maximize=["score"], minimize=["complexity"])
+
+        # keep evaluation in memory, this is costless and can greatly improve runtime
+        evals = dict()
+
         pop_size = self.population_size
         subtree_mutation_size = int(pop_size * self.subtree_mutation_ratio)
-        hoist_mutation_size = int(pop_size * self.hoist_mutation_ratio)
         crossover_size = int(pop_size * self.crossover_ratio)
-        reproduction_size = (
-            pop_size - subtree_mutation_size - hoist_mutation_size - crossover_size
-        )
-        selection_size = max(subtree_mutation_size, hoist_mutation_size, crossover_size)
+        reproduction_size = pop_size - subtree_mutation_size - crossover_size
+        selection_size = max(subtree_mutation_size, crossover_size)
 
-        max_fit = -np.inf
+        max_fit = np.inf  # FIXME works with r2_score
         n_iter_no_change = 0
+        if self.n_iter_no_change is None:
+            _n_iter_no_change = max(3, self.n_iter // 4)
+        else:
+            _n_iter_no_change = self.n_iter_no_change
 
         for _ in range(self.n_iter):
-            fitness_vect = self.evaluate_population(population, X, y)
+            to_eval = population - evals.keys()  # avoid recomputing
+            fitness_vect = self.evaluate_population(to_eval, X, y)
+            fitness_vect = pd.Series(
+                {**fitness_vect, **{k: v for k, v in evals.items() if k in population}}
+            )
+            complexities = fitness_vect.index.map(complexity).astype(float)
+            evals.update(fitness_vect)
             _max_fit = fitness_vect.max()
-            if _max_fit <= max_fit:
+            history_payload = dict(
+                fitness_median=fitness_vect.median(),
+                fitness_max=_max_fit,
+                expr_complexity_mean=np.mean(complexities),
+            )
+            history.append(history_payload)
+            if _max_fit < max_fit:
                 n_iter_no_change += 1
             else:
                 max_fit = _max_fit
-            if n_iter_no_change >= self.n_iter_no_change:
+            if n_iter_no_change >= _n_iter_no_change:
                 break
-            history_payload = dict(
-                fitness_median=fitness_vect.median(),
-                fitness_max=fitness_vect.max(),
-                expr_complexity_mean=np.mean(fitness_vect.index.map(complexity)),
-            )
-            history.append(history_payload)
 
             # SELECTION
             index = fitness_vect.nlargest(selection_size).index
@@ -200,27 +211,40 @@ class SymbolicRegression(BaseEstimator, RegressorMixin):
             # start with those who reproduce, unmodified
             population = set(reproduction.index)
 
-            # HOIST MUTATIONS
-            for expr in random_state.choice(index, size=hoist_mutation_size):
-                hoisted = hoist_mutation(expr, random_state=random_state)
-                population.add(hoisted)
-
             # SUBTREE MUTATIONS
-            for expr in random_state.choice(index, size=subtree_mutation_size):
+            ctr = 0  # use a counter to limit the tries on new expression creation
+            while (
+                len(population) < len(reproduction) + subtree_mutation_size
+                and ctr < 1000
+            ):
+                expr = random_state.choice(index)
                 subtree_mutant = subtree_mutation(
                     expr, self.operators, syms, random_state=random_state,
                 )
                 population.add(subtree_mutant)
+                ctr += 1
 
             # CROSSOVERS
-            for expr1, expr2 in random_state.choice(index, size=(crossover_size, 2)):
-                # child = crossover(expr1, expr2, random_state=random_state)  # FIXME
-                child = expr1 + expr2
+            # 1. update the pareto frontier
+            for _ in zip(fitness_vect.index, fitness_vect.values, complexities.values):
+                payload = dict(zip(("expr", "score", "complexity"), _))
+                pareto_archive.update(payload)
+
+            # 2. use pareto exprs for breeding
+            ctr = 0
+            while len(population) < pop_size and ctr < 1000:
+                pareto_expr = random_state.choice(pareto_archive)["expr"]
+                expr = random_state.choice(index)
+                # child = pareto_expr + expr
+                child = crossover(
+                    donor=pareto_expr, receiver=expr, random_state=random_state
+                )
                 population.add(child)
+                ctr += 1
 
         self.symbols_ = syms
         self.history_ = history
-        self.hall_of_fame_ = self.evaluate_population(population, X, y)
+        self.hall_of_fame_ = pd.Series(evals).nlargest(self.population_size)
         self.expression_ = self.hall_of_fame_.idxmax()
         return self
 
@@ -251,7 +275,7 @@ class SymbolicRegression(BaseEstimator, RegressorMixin):
 
         This version tries to identify subexpressions, in order to mutualise
         pre-computed results.
-        """  # TODO : define this function outside of this class
+        """  # TODO : define this function outside of this class, and return evaluations, not scores
         from .operators import UserDefinedFunction
 
         sym_gen = symbol_generator()
