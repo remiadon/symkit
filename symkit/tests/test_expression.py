@@ -18,7 +18,7 @@ syms = symbols("X:10")
 
 @pytest.mark.parametrize("size", (2, 5, 10, 20))
 def test_random_expression_full(size):
-    random_state = check_random_state(None)
+    random_state = check_random_state(12)
     ops = [add2, sub2, div2, mul2, sin1, cos1]
     expr = random_expr_full(ops, syms, size, random_state)
     assert complexity(expr) == pytest.approx(size, rel=0.2)

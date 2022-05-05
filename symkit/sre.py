@@ -2,90 +2,55 @@ from typing import List, Mapping
 
 import numpy as np
 import pandas as pd
+import polars as pl
+
+# from joblib.parallel import delayed
+import sympy as sp
 from river.utils import Skyline
 from sklearn.base import BaseEstimator, RegressorMixin
 from sklearn.exceptions import NotFittedError
-from sklearn.metrics import mean_squared_error, r2_score
+from sklearn.metrics import r2_score
 from sklearn.utils import check_array, check_X_y
 from sklearn.utils.validation import check_random_state
-from symengine import lambdify
 
-# from joblib.parallel import delayed
-from sympy import Expr, symbols
-from sympy.core.symbol import Symbol
-
-from .core import symbol_generator
+from .core import sympy_to_polars
 from .expression import (
     complexity,
     crossover,
-    hoist_mutation,
     random_expr_full,
     random_expr_grow,
     subtree_mutation,
 )
-from .operators import UserDefinedFunction, add2, div2, mul2, sub2
-
-
-def _execute_postprocess(res, size=None):
-    res = np.asfarray(res).reshape(-1)
-    if res.shape[0] != size:
-        return np.repeat(res[0], size)
-    nans = np.isnan(res) | (res == np.inf) | (res == -np.inf)
-    if nans.any():  # FIXME this happened with expr=X9**(-X10)
-        res[nans] = 10_000_000  # FIXME set arbitrary high value ?
-    return res
-
-
-def _execute_udf(expr: Expr, X: Mapping, symbol_gen):
-    from sympy import nan, oo, zoo
-
-    n_samples = max(map(len, X.values()))
-
-    if expr.is_Number:
-        return np.repeat(float(expr), n_samples)  # TODO : return a scalar
-
-    if expr.is_Symbol:
-        return X[expr]
-
-    if expr.has(oo, -oo, zoo, nan):
-        return np.zeros(n_samples, dtype=float)  # TODO log this
-
-    if isinstance(expr, UserDefinedFunction):
-        # recursive calls to still rely on lambdify in subexpressions
-        args = list()
-        for _ in expr.args:
-            args.append(_execute_udf(_, X, symbol_gen))
-        return expr.vectorized_fn(*args)  # eg. protected div
-
-    syms = list(expr.free_symbols)
-
-    user_defined = expr.find(UserDefinedFunction)
-    if user_defined:
-        replace_dict = dict()
-        for _ in user_defined:
-            res = _execute_udf(_, X, symbol_gen)
-            var = next(symbol_gen)
-            X[var] = res
-            replace_dict[_] = var
-        expr = expr.subs(replace_dict)
-
-    syms, args = zip(*X.items())
-
-    fn = lambdify(syms, [expr], order="F")
-
-    res = fn(args)
-
-    return res.reshape(-1)  # make sure this is a vector
+from .operators import add2, div2, mul2, sub2
+from .population import Population
 
 
 def score(y, y_pred, expr):
     return r2_score(y, y_pred) - complexity(expr) / 1000
 
 
+def evaluate_population(population: List[sp.Expr], X: pl.DataFrame, y):
+    """
+    1. converts all sympy expressions within `population` to polars.Expr instances
+    2. alias all resulting polars.Expr as their original sympy equivalent
+    3. call X.compute() of all expressions to get predictions
+    4. score those predictions given `y`
+    """
+    pl_expressions = list()
+    for expr in population:
+        pl_expr = sympy_to_polars(expr)
+        pl_expressions.append(pl_expr.alias(str(expr)))
+
+    preds = X.select(pl_expressions)
+    pd_preds = preds.to_pandas()  # TODO : implement r2_score in polars to avoid this
+    fitness = {expr: score(y, pd_preds[str(expr)], expr) for expr in population}
+    return pd.Series(fitness)
+
+
 class SymbolicRegression(BaseEstimator, RegressorMixin):
     def __init__(
         self,
-        operators: List[Expr] = (add2, sub2, mul2, div2),
+        operators: List[sp.Expr] = (add2, sub2, mul2, div2),
         population_size: int = 100,
         n_iter: int = 20,
         n_iter_no_change: int = None,
@@ -108,22 +73,19 @@ class SymbolicRegression(BaseEstimator, RegressorMixin):
         self.random_state = random_state
 
     def _check_input(self, X, y=None):
-        if not isinstance(X, pd.DataFrame):
+        if not isinstance(X, pl.DataFrame):
             if y is not None:
                 X, y = check_X_y(X, y)  # TODO : check parameter setting for `check_X_y`
             else:
                 X = check_array(X)
-            syms = symbols(f"X:{X.shape[1]}")
-            X = pd.DataFrame(X, columns=list(syms))
-        else:
-            X = X.copy(deep=False)  # do not modify the original df
-            X.columns = X.columns.map(Symbol)
+            X = pl.DataFrame(X, columns=["X" + str(i) for i in range(X.shape[1])])
+        y = pl.Series(y)
         return X, y
 
     def fit(self, X, y):
         X, y = self._check_input(X, y)
         random_state = check_random_state(self.random_state)
-        syms = X.columns.tolist()
+        syms = sp.symbols(X.columns)
         population = self.prefit(syms, random_state)
         return self._fit(X, y, population, syms, random_state)
 
@@ -137,10 +99,10 @@ class SymbolicRegression(BaseEstimator, RegressorMixin):
     #    population = self.hall_of_fame_.index.tolist()  # start from pre-learned set of expressions
     #    return self._fit(X, y, population, syms, random_state)
 
-    def prefit(self, syms, random_state):
+    def prefit(self, syms, random_state) -> Population:
         # intiliaze to random
         # use a set for deduplication
-        population = set()
+        population = Population()
         low, high = self.init_size
         n_iter = 0
         n_grow = self.population_size // 2  # TODO : pass ratio as param
@@ -183,7 +145,7 @@ class SymbolicRegression(BaseEstimator, RegressorMixin):
 
         for _ in range(self.n_iter):
             to_eval = population - evals.keys()  # avoid recomputing
-            fitness_vect = self.evaluate_population(to_eval, X, y)
+            fitness_vect = evaluate_population(to_eval, X, y)
             fitness_vect = pd.Series(
                 {**fitness_vect, **{k: v for k, v in evals.items() if k in population}}
             )
@@ -209,7 +171,7 @@ class SymbolicRegression(BaseEstimator, RegressorMixin):
             # REPRODUCTION
             reproduction = fitness_vect.nlargest(reproduction_size)
             # start with those who reproduce, unmodified
-            population = set(reproduction.index)
+            population = Population(reproduction.index)
 
             # SUBTREE MUTATIONS
             ctr = 0  # use a counter to limit the tries on new expression creation
@@ -269,59 +231,13 @@ class SymbolicRegression(BaseEstimator, RegressorMixin):
             ),
         }
 
-    def evaluate_population(self, population: List[Expr], X: pd.DataFrame, y):
-        """
-        apply a population of sympy expression onto the input data `X`
-
-        This version tries to identify subexpressions, in order to mutualise
-        pre-computed results.
-        """  # TODO : define this function outside of this class, and return evaluations, not scores
-        from .operators import UserDefinedFunction
-
-        sym_gen = symbol_generator()
-        udfs = {
-            expr
-            for expr in population
-            if expr.has(UserDefinedFunction) or expr.is_Number
-        }
-        pures = list(set(population) - udfs)
-
-        # execute user defined functions in a purely iterative way, to avoid risks
-        preds = dict()
-        _X = dict(zip(X.columns.tolist(), X.values.T))
-        for expr in udfs:  # for loop instead of dictcomp for easier debugging
-            ex = _execute_udf(expr, _X, sym_gen)
-            preds[expr] = ex
-
-        if pures:
-            pure_syms = list(set.union(*(_.free_symbols for _ in pures)))
-            pure_fn = lambdify(pure_syms, pures)
-            _X = X[pure_syms].values
-            pure_preds = pure_fn(_X)
-            pure_preds = dict(zip(pures, pure_preds))
-            preds.update(pure_preds)
-
-        preds = {
-            expr: _execute_postprocess(pred, size=X.shape[0])
-            for expr, pred in preds.items()
-        }
-        fitness = {expr: score(y, y_pred, expr) for expr, y_pred in preds.items()}
-        return pd.Series(fitness)
-
     def predict(self, X):
         expr = getattr(self, "expression_", None)
         if expr is None:
             raise NotFittedError()
         X, _ = self._check_input(X, y=None)
-        if expr.has(UserDefinedFunction) or expr.is_Number:
-            _X = dict(zip(X.columns.tolist(), X.values.T))
-            y_pred = _execute_udf(expr, _X, symbol_gen=symbol_generator())
-        else:
-            syms = list(expr.free_symbols)
-            fn = lambdify(syms, [expr])
-            y_pred = fn(X[syms])
-        y_pred = _execute_postprocess(y_pred, size=X.shape[0])
-        return y_pred
+        pl_fn = sympy_to_polars(expr)
+        return X.select(pl_fn).to_pandas()
 
     # TODO predict_proba from (mean) sigmoid from self.expression | self.hall_of_fame
 
