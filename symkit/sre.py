@@ -13,7 +13,7 @@ from sklearn.metrics import r2_score
 from sklearn.utils import check_array, check_X_y
 from sklearn.utils.validation import check_random_state
 
-from .core import sympy_to_polars
+from .core import sympy_to_polars, sympy_to_str
 from .expression import (
     complexity,
     crossover,
@@ -21,12 +21,9 @@ from .expression import (
     random_expr_grow,
     subtree_mutation,
 )
+from .metrics import pl_r2_score
 from .operators import add2, div2, mul2, sub2
 from .population import Population
-
-
-def score(y, y_pred, expr):
-    return r2_score(y, y_pred) - complexity(expr) / 1000
 
 
 def evaluate_population(population: List[sp.Expr], X: pl.DataFrame, y):
@@ -42,9 +39,10 @@ def evaluate_population(population: List[sp.Expr], X: pl.DataFrame, y):
         pl_expressions.append(pl_expr.alias(str(expr)))
 
     preds = X.select(pl_expressions)
-    pd_preds = preds.to_pandas()  # TODO : implement r2_score in polars to avoid this
-    fitness = {expr: score(y, pd_preds[str(expr)], expr) for expr in population}
-    return pd.Series(fitness)
+    fitness = pl_r2_score(preds, y)
+    res = fitness.to_pandas().T.loc[:, 0]
+    res.index = list(population)
+    return res
 
 
 class SymbolicRegression(BaseEstimator, RegressorMixin):

@@ -1,10 +1,14 @@
 import numbers
+import operator
 import re
-from functools import lru_cache
+from functools import lru_cache, reduce
+from multiprocessing.sharedctypes import Value
 
 import polars as pl
 import sympy as sp
-from sympy import lambdify, symbols
+from sympy import symbols
+
+__acc_start_vals = dict(mul=1, add=0)
 
 
 def symbol_generator():
@@ -17,6 +21,9 @@ def symbol_generator():
 @lru_cache()
 def camel_to_lower(s: str):
     return re.sub(r"(?<!^)(?=[A-Z])", "_", s).lower()
+
+
+sympy_to_str = lru_cache()(str)  # hash(expr) is fast, but str(expr) is slow
 
 
 @lru_cache()
@@ -34,12 +41,14 @@ def _sympy_to_polars(expr: sp.Expr) -> pl.Expr:
     pl_fn = getattr(expr, "polars", None)
     if pl_fn is not None:
         return pl_fn(*args)
-    _t = camel_to_lower(str(type(expr)))
+    _t = str(type(expr)).rsplit(".", 1)[1].replace("'>", "")
+    _t = camel_to_lower(_t)
     pl_fn = getattr(pl.Expr, _t, None)
     if pl_fn is None:
-        syms = symbols(f"X0:{len(args)}")
-        _expr = type(expr)(*syms)
-        pl_fn = lambdify(syms, _expr)
+        op = getattr(operator, _t, None)
+        pl_fn = lambda *args: reduce(op, args, __acc_start_vals[_t])
+        if pl_fn is None:
+            raise ValueError(f"could not retrive operator for {_t}")
     return pl_fn(*args)
 
 

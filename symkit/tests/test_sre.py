@@ -57,14 +57,14 @@ def test_evaluate_population(body_mass_index, body_mass_candidate_expressions):
     fitness = evaluate_population(population, X, y)
     expected = pd.Series([-3138.02, -179.96, -85065064.57, 1.0], index=population)
     expected = expected[fitness.index]
-    pd.testing.assert_series_equal(fitness, expected, atol=0.1)
+    pd.testing.assert_series_equal(fitness, expected, atol=0.1, check_names=False)
     evaluated_syms = set.union(*fitness.index.map(lambda e: e.find(Symbol)))
     orig_syms = set.union(*(_.find(Symbol) for _ in population))
     assert evaluated_syms == orig_syms
 
 
 @pytest.mark.parametrize("n_iter", [5, 10])
-@pytest.mark.parametrize("population_size", [30, 50])
+@pytest.mark.parametrize("population_size", [28, 50])
 def test_fit(body_mass_index, n_iter, population_size):
     from ..operators import add2, div2, mul2, sub2
 
