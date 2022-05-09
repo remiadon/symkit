@@ -238,7 +238,10 @@ class SymbolicRegression(BaseEstimator, RegressorMixin):
             raise NotFittedError()
         X, _ = self._check_input(X, y=None)
         pl_fn = sympy_to_polars(expr)
-        return X.select(pl_fn).to_pandas()
+        res = X.select(pl_fn).to_numpy().reshape(-1)
+        if len(res) < X.shape[0]:
+            res = res.repeat(X.shape[0] // len(res))
+        return res
 
     # TODO predict_proba from (mean) sigmoid from self.expression | self.hall_of_fame
 
