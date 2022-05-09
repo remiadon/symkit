@@ -19,6 +19,7 @@ def test_pdiv(dtype):
     assert pdiv(pdiv(a, b), c) == pdiv(a, c * b)
     assert pdiv(pdiv(a, b), a) == pdiv(1, b)
     assert pdiv(pdiv(a, b), b) == pdiv(a, b ** 2)
+    assert pdiv(1, b) * pdiv(a, b) == pdiv(a, b ** 2)
     assert pdiv(4 * a, a) == 4
 
     pl_pdiv = pdiv(a, b).polars(pl.col("a"), pl.col("b"))

@@ -43,6 +43,11 @@ class pdiv(UserDefinedFunction):
             a, b = y.args
             return pdiv(x * b, a)
 
+    def __mul__(self, other):
+        if isinstance(other, pdiv):  # pdiv(1, X1) * pdiv(X1, X2) = pdiv(1, X2**2)
+            return pdiv(self.args[0] * other.args[0], self.args[1] * other.args[1])
+        return super().__mul__(other)
+
     def polars(self, x: pl.Expr, y: pl.Expr):
         return pl.when(pl_abs(y) > 0.001).then(x / y).otherwise(pl.lit(1))
 

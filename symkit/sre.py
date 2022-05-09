@@ -34,9 +34,9 @@ def evaluate_population(population: List[sp.Expr], X: pl.DataFrame, y):
     4. score those predictions given `y`
     """
     pl_expressions = list()
-    for expr in population:
+    for idx, expr in enumerate(population):
         pl_expr = sympy_to_polars(expr)
-        pl_expressions.append(pl_expr.alias(str(expr)))
+        pl_expressions.append(pl_expr.alias(str(idx)))
 
     preds = X.select(pl_expressions)
     fitness = pl_r2_score(preds, y)
@@ -76,7 +76,10 @@ class SymbolicRegression(BaseEstimator, RegressorMixin):
                 X, y = check_X_y(X, y)  # TODO : check parameter setting for `check_X_y`
             else:
                 X = check_array(X)
-            X = pl.DataFrame(X, columns=["X" + str(i) for i in range(X.shape[1])])
+            if isinstance(X, pd.DataFrame):
+                X = pl.from_pandas(X)
+            else:
+                X = pl.DataFrame(X, columns=["X" + str(i) for i in range(X.shape[1])])
         y = pl.Series(y)
         return X, y
 
