@@ -51,10 +51,12 @@ def test_score(expr, score, body_mass_index):
     assert sc == pytest.approx(score, 0.05)
 
 
-def test_evaluate_population(body_mass_index, body_mass_candidate_expressions):
+def test_evaluate_population(
+    body_mass_index, body_mass_candidate_expressions, benchmark
+):
     population = [parse_expr(e) for e in body_mass_candidate_expressions]
     X, y = body_mass_index
-    fitness = evaluate_population(population, X, y)
+    fitness = benchmark(evaluate_population, population, X, y)
     expected = pd.Series([-3138.02, -179.96, -85065064.57, 1.0], index=population)
     expected = expected[fitness.index]
     pd.testing.assert_series_equal(fitness, expected, atol=0.1, check_names=False)
@@ -65,7 +67,7 @@ def test_evaluate_population(body_mass_index, body_mass_candidate_expressions):
 
 @pytest.mark.parametrize("n_iter", [5, 10])
 @pytest.mark.parametrize("population_size", [28, 50])
-def test_fit(body_mass_index, n_iter, population_size):
+def test_fit(body_mass_index, n_iter, population_size, benchmark):
     from ..operators import add2, div2, mul2, sub2
 
     X, y = body_mass_index
@@ -76,7 +78,7 @@ def test_fit(body_mass_index, n_iter, population_size):
         operators=[add2, sub2, div2, mul2],
         init_size=(2, 6),
     )
-    sre.fit(X, y)
+    benchmark(sre.fit, X, y)
     assert sre.expression_
     assert sre.score(X, y) == pytest.approx(1.0, 0.1)
     assert complexity(sre.expression_) < 10
