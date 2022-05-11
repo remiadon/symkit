@@ -1,6 +1,9 @@
+from functools import lru_cache
+
 import numpy as np
+import sympy as sp
 from sklearn.utils import check_random_state
-from sympy import S, Symbol, preorder_traversal
+from sympy import S, Symbol, postorder_traversal, preorder_traversal
 
 _STATE = check_random_state(23)
 
@@ -116,3 +119,27 @@ def complexity(expr):
             continue
         ctr += 1
     return ctr
+
+
+@lru_cache()
+def tree_hash(expr: sp.Expr):
+    hashes = list()
+    for node in postorder_traversal(expr):
+        to_hash = type(node) if node.args else node
+        hashes.append(hash(to_hash))
+    return sorted(hashes)
+
+
+def tree_distance(expr1: sp.Expr, expr2: sp.Expr):
+    H1, H2 = tree_hash(expr1), tree_hash(expr2)
+    i = j = count = 0
+    while i < len(H1) and j < len(H2):
+        if H1[i] == H2[j]:
+            count += 1
+            i += 1
+            j += 1
+        elif H1[i] < H2[j]:
+            i += 1
+        else:
+            j += 1
+    return 1 - ((2 * count) / (len(H1) + len(H2)))

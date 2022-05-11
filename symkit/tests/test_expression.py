@@ -10,6 +10,8 @@ from ..expression import (
     hoist_mutation,
     random_expr_full,
     random_expr_grow,
+    tree_distance,
+    tree_hash,
 )
 from ..operators import add2, cos1, div2, mul2, sin1, sub2
 
@@ -69,3 +71,18 @@ def test_hoist_mutation(expr):
     hoisted = hoist_mutation(expr, random_state=check_random_state(8))
     assert complexity(hoisted) < complexity(expr)
     assert hoisted.find(Symbol).issubset(expr.find(Symbol))
+
+
+@pytest.mark.parametrize("expr", ["sin(X ** 2) - 2 + cos(Y)", "Abs(X // 2) + Y % 3"])
+def test_tree_hash(expr):
+    expr = parse_expr(expr)
+    hashes = tree_hash(expr)
+    assert len(hashes) == complexity(expr)
+
+
+def test_tree_distance():
+    a, b, c = parse_expr("X0 + 1"), parse_expr("X0 + 2"), parse_expr("X0 * 3")
+    assert tree_distance(a, b) < tree_distance(b, c)
+    d = parse_expr("(X0 + 1) * 2")
+    assert tree_distance(a, b) < tree_distance(a, d)
+    assert tree_distance(a, d) < tree_distance(a, c)

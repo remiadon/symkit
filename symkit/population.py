@@ -1,7 +1,13 @@
 """
 A helper class to represent a population of sympy expressions
 """
+from collections import defaultdict
+
+import numpy as np
+import pandas as pd
 import sympy as sp
+
+from .expression import tree_distance
 
 
 class Population(set):
@@ -36,6 +42,22 @@ class Population(set):
         # if element.has(sp.Rational):
         #    print(f"avoiding {element} because it contains a Rational")
         super().add(element)
+
+
+def tree_distances(population: Population):
+    distances = defaultdict(list)
+    cache = dict()
+    index = list(population)
+    for element in index:
+        universe = population - {element}
+        for cand in universe:
+            key = frozenset((element, cand))
+            dist = cache.get(key)
+            if dist is None:
+                dist = tree_distance(element, cand)
+            cache[key] = dist
+            distances[element].append(dist)
+    return pd.DataFrame(distances)
 
 
 Population._wrap_methods(
