@@ -7,7 +7,7 @@ from sklearn.utils import check_random_state
 from sympy import S, Symbol, symbols
 
 from symkit.expression import hoist_mutation, random_expr_full, random_expr_grow
-from symkit.operators import add2, div2, mul2, sub2
+from symkit.operators import add, mul, pdiv, sub
 
 from .expression import complexity, get_subtree
 
@@ -61,7 +61,7 @@ class OnlineSymbolicRegression(base.Regressor):
     def __init__(
         self,
         population_size: int = 20,
-        operators=[add2, sub2, div2, mul2],
+        operators=[add, sub, mul, pdiv],
         random_state=None,
         init_size=(3, 8),
         random_mutation_size=1,
