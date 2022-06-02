@@ -2,3 +2,7 @@
 *.pyc
 *.tar.gz
 *.whl
+.benchmarks/
+.ipynb_checkpoints/
+*.json
+
