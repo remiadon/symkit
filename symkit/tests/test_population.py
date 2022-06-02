@@ -1,9 +1,8 @@
 import pandas as pd
-import pytest
 from sklearn.utils import check_random_state
 from sympy import symbols
 
-from ..operators import add, cos, mul, pdiv, sub
+from ..operators import add2, cos1, div2, mul2, sub2
 from ..population import get_next_generation, tree_distances
 
 
@@ -22,7 +21,7 @@ def test_population_class():
         {x ** y: 2.0, x + y: 3.0, x - y: 1.0, x + (2 * y): 0.5, cos(x): 4.0,}
     )
 
-    fns = [add, sub, cos]
+    fns = [add2, sub2, cos1]
 
     new_gen = get_next_generation(
         fitness,

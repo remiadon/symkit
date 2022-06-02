@@ -2,23 +2,21 @@
 A helper class to represent a population of sympy expressions
 """
 from collections import defaultdict
-from typing import FrozenSet, List, MutableSet, NewType, Union
+from typing import FrozenSet, List, NewType
 
-import numpy as np
 import pandas as pd
 import sympy as sp
 from river.utils import Skyline
-from sklearn.utils.validation import check_random_state
 
 from .expression import (
     complexity,
     crossover,
-    get_subtree,
     random_expr_full,
     random_expr_grow,
     subtree_mutation,
     tree_distance,
 )
+from .operators import pdiv
 
 Population = NewType("Population", FrozenSet[sp.Expr])  # TODO frozenset
 
@@ -49,6 +47,8 @@ def add_in(population: Population, element: sp.Expr) -> None:
                 it contains {power} for which the exponent should be an int
             """
             )
+        return
+    if element.count(pdiv) > 2:  # FIXME, simplify complex exprs with many pdiv
         return
     population.add(element)
 
@@ -84,7 +84,7 @@ def populate(
 
 def get_next_generation(
     fitness: pd.Series,
-    functions: List[sp.Function],
+    bases: List[sp.Expr],
     symbols: List[sp.Symbol],
     random_state,
     crossover_ratio=0.4,
@@ -106,7 +106,7 @@ def get_next_generation(
     while ctr < 1000 and len(new_gen) < reproduction_len + subtree_len:
         expr = random_state.choice(bests)
         mutant = subtree_mutation(
-            expr, functions, symbols, random_state=random_state, p_float=p_float
+            expr, bases, symbols, random_state=random_state, p_float=p_float
         )
         add_in(new_gen, mutant)
         ctr += 1

@@ -7,7 +7,7 @@ from sklearn.utils import check_random_state
 from sympy import S, Symbol, symbols
 
 from symkit.expression import hoist_mutation, random_expr_full, random_expr_grow
-from symkit.operators import add, mul, pdiv, sub
+from symkit.operators import add2, div2, mul2, sub2
 
 from .expression import complexity, get_subtree
 
@@ -61,7 +61,7 @@ class OnlineSymbolicRegression(base.Regressor):
     def __init__(
         self,
         population_size: int = 20,
-        operators=[add, sub, mul, pdiv],
+        bases=(add2, sub2, mul2, div2),
         random_state=None,
         init_size=(3, 8),
         random_mutation_size=1,
@@ -71,7 +71,7 @@ class OnlineSymbolicRegression(base.Regressor):
             raise ValueError("sample_weight_inc should be in [0.0, 0.5]")
         self.population_size = population_size
         # self._supervised = True
-        self.operators = operators
+        self.bases = bases
         self.random_state = check_random_state(random_state)
         self._hof = None
         self.init_size = init_size
@@ -82,7 +82,7 @@ class OnlineSymbolicRegression(base.Regressor):
         self._subtree = partial(
             subtree_mutation,
             random_state=self.random_state,
-            ops=self.operators,
+            ops=self.bases,
             size=random_mutation_size,
         )
         self.expression = S.Zero
@@ -96,7 +96,7 @@ class OnlineSymbolicRegression(base.Regressor):
             hof = init_population(
                 self.random_state,
                 self.population_size,
-                self.operators,
+                self.bases,
                 self.init_size,
                 syms,
             )
@@ -145,7 +145,7 @@ class OnlineSymbolicRegression(base.Regressor):
                     init_population(
                         self.random_state,
                         diff,
-                        self.operators,
+                        self.bases,
                         self.init_size,
                         syms,
                         population=set(hof),
@@ -160,7 +160,7 @@ class OnlineSymbolicRegression(base.Regressor):
                     init_population(
                         self.random_state,
                         len(nans),
-                        self.operators,
+                        self.bases,
                         self.init_size,
                         syms,
                         population=set(hof),

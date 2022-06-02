@@ -14,7 +14,7 @@ from ..expression import (
     tree_distance,
     tree_hash,
 )
-from ..operators import add, cos, mul, pdiv, sin, sub
+from ..operators import add2, cos1, div2, mul2, sin1, sub2
 
 syms = symbols("X:10")
 
@@ -24,23 +24,15 @@ def test_getsubtree():
     X0, X1, *_ = syms
     expr = X0 * (X1 + 1) ** 2
     subs = [get_subtree(expr, rs, start=0) for _ in range(6)]
-    assert subs == [
-        X0 * (X1 + 1) ** 2,
-        X1 + 1,
-        X0 * (X1 + 1) ** 2,
-        X1 + 1,
-        X0 * (X1 + 1) ** 2,
-        X1,
-    ]
-
+    assert subs == [X0 * (X1 + 1) ** 2, 1, (X1 + 1) ** 2, X1 + 1, X0 * (X1 + 1) ** 2, 2]
     subs = [get_subtree(expr, rs, start=1) for _ in range(4)]
-    assert subs == [X1, X0, 2, (X1 + 1) ** 2]
+    assert subs == [2, (X1 + 1) ** 2, 2, (X1 + 1) ** 2]
 
 
 @pytest.mark.parametrize("size", (2, 5, 10, 20))
 def test_random_expression_full(size):
     random_state = check_random_state(12)
-    ops = [add, sub, pdiv, mul, sin, cos]
+    ops = [add2, sub2, mul2, div2, sin1, cos1]
     expr = random_expr_full(ops, syms, size, random_state, p_float=0.0)
     assert complexity(expr) <= size
 
@@ -48,7 +40,7 @@ def test_random_expression_full(size):
 @pytest.mark.parametrize("size", (2, 5, 10, 20))
 def test_random_expression_grow(size):
     random_state = check_random_state(None)
-    ops = [add, sub, pdiv, mul, sin, cos]
+    ops = [add2, sub2, mul2, div2, sin1, cos1]
     expr = random_expr_grow(ops, syms, size, random_state, p_float=0.0)
     assert complexity(expr) == size
     assert expr.count(Symbol) <= size
@@ -58,13 +50,13 @@ def test_random_expression_grow(size):
     "expr1,expr2,result",
     [
         ("X0 * 2", "X6", "X6"),
-        ("X6", "X0 * X2", "X0 * X6"),  # non commutative
-        ("X0 * 3 + X2", "(X3 - X1) * (X4 + 2)", "3 * X0 * (X4 + 2)"),
-        ("Mul(a, b, c)", "(a / (b - 4)) * (c + d)", "(a * b) / (b - 4)"),
+        ("X6", "X0 * X2", "X2 * X6"),  # non commutative
+        ("X0 * 3 + X2", "(X3 - X1) * (X4 + 2)", "(3 * X0 + X2) * (X4 + 2)"),
+        ("Mul(a, b, c)", "(a / (b - 4)) * (c + d)", "a * (c + d) / (a * b * c + b)"),
     ],
 )
 def test_crossover(expr1, expr2, result):
-    random_state = check_random_state(20)
+    random_state = check_random_state(2)
     expr1 = parse_expr(expr1)
     expr2 = parse_expr(expr2)
     child = crossover(expr1, expr2, random_state=random_state)
@@ -87,7 +79,7 @@ def test_complexity(expr, complexity_mesure):
 @pytest.mark.parametrize("expr", ["sin(X ** 2) - 2 + cos(Y)", "Abs(X // 2) + Y % 3",])
 def test_hoist_mutation(expr):
     expr = parse_expr(expr)
-    hoisted = hoist_mutation(expr, random_state=check_random_state(8))
+    hoisted = hoist_mutation(expr, random_state=check_random_state(2))
     assert complexity(hoisted) < complexity(expr)
     assert hoisted.find(Symbol).issubset(expr.find(Symbol))
 

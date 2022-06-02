@@ -14,7 +14,7 @@ from sklearn.utils.validation import check_random_state
 
 from .core import sympy_to_polars
 from .metrics import pl_r2_score
-from .operators import add, mul, pdiv, sub
+from .operators import add2, div2, mul2, sub2
 from .population import get_next_generation, populate
 
 
@@ -40,21 +40,21 @@ def evaluate_population(population: Iterable[sp.Expr], X: pl.DataFrame, y):
 class SymbolicRegression(BaseEstimator, RegressorMixin):
     def __init__(
         self,
-        operators: List[sp.Function] = (add, sub, mul, pdiv),
+        bases: List[sp.Expr] = (add2, sub2, mul2, div2),
         population_size: int = 100,
         n_iter: int = 20,
         n_iter_no_change: int = None,
-        init_size=(2, 8),
+        init_size=(2, 6),
         crossover_ratio=0.4,
         subtree_mutation_ratio=0.3,
-        p_float=0.2,
+        p_float=0.0,
         random_state=12,
     ):
         assert population_size
         self.population_size = population_size
         self.n_iter = n_iter
         self.n_iter_no_change = n_iter_no_change
-        self.operators = operators
+        self.bases = bases
         assert isinstance(init_size, tuple) and len(init_size) == 2
         self.init_size = init_size
         assert sum((crossover_ratio, subtree_mutation_ratio)) < 0.9
@@ -63,6 +63,7 @@ class SymbolicRegression(BaseEstimator, RegressorMixin):
         # self.hoist_mutation_ratio = hoist_mutation_ratio
         self.random_state = random_state
         self.p_float = p_float
+        self.init_size = init_size
 
     def _check_input(self, X, y=None):
         if not isinstance(X, pl.DataFrame):
@@ -82,8 +83,9 @@ class SymbolicRegression(BaseEstimator, RegressorMixin):
         self.random_state = check_random_state(self.random_state)
 
         self.symbols_ = sp.symbols(X.columns)
+
         first_generation = populate(
-            self.operators,
+            self.bases,
             self.symbols_,
             random_state=self.random_state,
             population_size=self.population_size,
@@ -120,7 +122,7 @@ class SymbolicRegression(BaseEstimator, RegressorMixin):
 
             population: FrozenSet[sp.Expr] = get_next_generation(
                 fitness,
-                self.operators,
+                self.bases,
                 self.symbols_,
                 self.random_state,
                 self.crossover_ratio,

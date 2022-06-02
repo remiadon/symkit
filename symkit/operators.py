@@ -1,7 +1,5 @@
 import polars as pl
-from sympy import Abs
-from sympy import Add as add
-from sympy import Function
+from sympy import Abs, Add, Function
 from sympy import Mul as mul
 from sympy import S, cos, sin
 from sympy.abc import x, y
@@ -9,12 +7,6 @@ from sympy.abc import x, y
 pl_abs = (
     lambda x: pl.when(x >= 0).then(x).otherwise(-x)
 )  # .abs is not defined in polars expression
-
-
-class sub(Function):
-    @classmethod
-    def eval(cls, x, y):
-        return add(x, -y)
 
 
 class UserDefinedFunction(Function):
@@ -80,7 +72,9 @@ class plog(UserDefinedFunction):
         return pl.when(pl_abs(x) > 0.001).then(x.log()).otherwise(0)
 
 
-add2 = add(x, y)
-sub2 = add(x, -y)
+add2 = x + y
+sub2 = x - y
 div2 = pdiv(x, y)
-mul2 = mul(x, y)
+mul2 = x * y
+cos1 = cos(x)
+sin1 = sin(x)

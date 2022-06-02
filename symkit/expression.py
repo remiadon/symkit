@@ -8,64 +8,67 @@ from sympy import Function, S, Symbol, postorder_traversal, preorder_traversal, 
 from sympy.core.operations import AssocOp
 
 
-@lru_cache()
-def arity(fn: sp.Function):
-    return sp.core.function.arity(fn) or 2
+def is_op(expr: sp.Expr):
+    return expr.free_symbols != {expr}
 
 
-def is_function(expr):
-    return isinstance(expr, (Function, AssocOp))
+def arity(expr: sp.Expr):
+    return expr.count(Symbol)
 
 
 def get_subtree(expr, random_state, start=0):
     picks = list(preorder_traversal(expr))[start:]
     if not picks:
         return S.Zero
-    probs = np.array([0.9 if is_function(_) else 0.1 for _ in picks])
+    probs = np.array([0.9 if is_op(_) else 0.1 for _ in picks])
     probs /= probs.sum()
     return random_state.choice(picks, p=probs)
 
 
 def random_expr_full(
-    functions: List[sp.Function],
+    operators: List[sp.Expr],
     symbols: List[sp.Symbol],
     size: int,
     random_state,
     p_float: float = 0.2,
 ):
-    fns = list({_ for _ in functions if arity(_) < size})
-    if size <= 1 or not fns:
+    ops = list({_ for _ in operators if arity(_) < size})
+    if size <= 1 or not ops:
         if random_state.choice([1, 0], p=[p_float, 1 - p_float]):
             return sympify(random_state.random_sample())
         else:
             return random_state.choice(symbols)
-    fn = random_state.choice(fns)
+
+    op = random_state.choice(ops)
+    orig_syms = list(op.free_symbols)
     subs = list()
-    d, remained = divmod(size - 1, arity(fn))
-    for arg_idx in range(arity(fn)):
-        _size = d + remained if arg_idx == arity(fn) - 1 else d
-        sub_expr = random_expr_full(fns, symbols, _size, random_state, p_float)
-        subs.append(sub_expr)
-    return fn(*subs)
+    d, remained = divmod(size - 1, arity(op))
+    for orig_sym in orig_syms:
+        _size = d + remained if orig_sym == orig_syms[-1] else d
+        sub_expr = random_expr_full(ops, symbols, _size, random_state, p_float)
+        subs.append((orig_sym, sub_expr))
+    return op.subs(subs)
 
 
 def random_expr_grow(
-    functions: List[sp.Function],
+    operators: List[sp.Function],
     symbols: List[sp.Symbol],
     size: int,
     random_state,
     p_float: float = 0.2,
 ):
     expr = random_state.choice(symbols)  # TODO : add float with p_float
-    fns = list({_ for _ in functions if arity(_) < size})
-    while fns:
-        p = np.array([arity(_) ** 2 for _ in fns])
+    ops = list({_ for _ in operators if arity(_) < size})
+    while ops:
+        p = np.array([arity(_) ** 2 for _ in ops])
         p = p / p.sum()
-        fn = random_state.choice(fns, p=p)
-        _syms = random_state.choice(symbols, size=arity(fn) - 1)
+        op = random_state.choice(ops, p=p)
+        _syms = random_state.choice(symbols, size=arity(op) - 1)
         args = [expr] + _syms.tolist()
-        expr = fn(*args)
-        fns = [_ for _ in fns if arity(_) <= size - complexity(expr)]
+        expr = type(op)(
+            *args
+        )  # TODO : avoid that in order to passed bases containing fixed arguments
+        ops = [_ for _ in ops if arity(_) <= size - complexity(expr)]
     return expr
 
 
@@ -109,7 +112,7 @@ def crossover(donor, receiver, random_state):
 def complexity(expr):
     ctr = 0
     for _ in preorder_traversal(expr):
-        if is_function(_) and _.args[0] == -1:
+        if _.is_Mul and _.args[0] == -1:  # eg. -X1 is X1 * -1
             ctr -= 1
             continue
         ctr += 1
