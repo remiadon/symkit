@@ -6,7 +6,6 @@ from typing import FrozenSet, List, NewType
 
 import pandas as pd
 import sympy as sp
-from river.utils import Skyline
 
 from .expression import (
     complexity,
@@ -18,7 +17,64 @@ from .expression import (
 )
 from .operators import pdiv
 
+
 Population = NewType("Population", FrozenSet[sp.Expr])  # TODO frozenset
+
+
+import collections
+
+
+class Skyline(collections.UserList):
+    def __init__(self, minimize: list = None, maximize: list = None):
+        super().__init__()
+        self.minimize = [] if minimize is None else minimize
+        self.maximize = [] if maximize is None else maximize
+
+        if len(self.minimize) + len(self.maximize) == 0:
+            raise ValueError("At least one name has to be specified")
+
+    def _count_diffs(self, a, b):
+        n_better = 0
+        n_worse = 0
+
+        for f in self.minimize:
+            n_better += a[f] < b[f]
+            n_worse += a[f] > b[f]
+
+        for f in self.maximize:
+            n_better += a[f] > b[f]
+            n_worse += a[f] < b[f]
+
+        return n_better, n_worse
+
+    def update(self, x):
+        if not self:
+            self.append(x)
+            return self
+
+        to_drop = []
+        is_dominated = False
+
+        for i, _ in enumerate(self):
+
+            n_better, n_worse = self._count_diffs(x, self[i])
+
+            if n_worse > 0 and n_better == 0:
+                is_dominated = True
+                break
+
+            if n_better > 0 and n_worse == 0:
+                to_drop.append(i)
+
+        if is_dominated:
+            return self
+
+        if to_drop:
+            for i in sorted(to_drop, reverse=True):
+                del self[i]
+        self.append(x)
+
+        return self
 
 
 def tree_distances(population: Population) -> pd.DataFrame:
