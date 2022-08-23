@@ -1,11 +1,19 @@
-import numpy as np
-from sympy import Abs, Function, S, cos, sin
+import polars as pl
+from sympy import Abs, Add, Function
+from sympy import Mul as mul
+from sympy import S, cos, sin
 from sympy.abc import x, y
+
+pl_abs = (
+    lambda x: pl.when(x >= 0).then(x).otherwise(-x)
+)  # .abs is not defined in polars expression
 
 
 class UserDefinedFunction(Function):
-    def vectorized_fn(self, *args):
-        raise NotImplementedError(f"You must implement `{self.__name__}`")
+    def polars(self, *args):
+        raise NotImplementedError(
+            f"You must implement the polars equivalent for this function"
+        )
 
 
 class pdiv(UserDefinedFunction):
@@ -36,16 +44,13 @@ class pdiv(UserDefinedFunction):
             a, b = y.args
             return pdiv(x * b, a)
 
-    def vectorized_fn(self, x, y):
-        x = np.asfarray(x).reshape(-1)
-        y = np.asfarray(y).reshape(-1)
-        oks = np.abs(y) > 0.001
-        ones = np.ones_like(x) if len(x) > len(y) else np.ones_like(y)
-        if oks is False:
-            return ones
-        elif oks is True:
-            oks = None
-        return np.divide(x, y, out=ones, where=oks)
+    def __mul__(self, other):
+        if isinstance(other, pdiv):  # pdiv(1, X1) * pdiv(X1, X2) = pdiv(1, X2**2)
+            return pdiv(self.args[0] * other.args[0], self.args[1] * other.args[1])
+        return super().__mul__(other)
+
+    def polars(self, x: pl.Expr, y: pl.Expr):
+        return pl.when(pl_abs(y) > 0.001).then(x / y).otherwise(pl.lit(1))
 
 
 class plog(UserDefinedFunction):
@@ -63,16 +68,13 @@ class plog(UserDefinedFunction):
             #  see https://github.com/sympy/sympy/issues/13781
             return x.args[1] * plog(x.args[0])
 
-    def vectorized_fn(self, x):
-        _len = getattr(x, "__len__", None)
-        oks = np.abs(x) > 0.001
-        zeros = np.zeros(_len(), dtype=float) if _len else None
-        return np.log(x, out=zeros, where=oks)
+    def polars(self, x: pl.Expr):
+        return pl.when(pl_abs(x) > 0.001).then(x.log()).otherwise(0)
 
 
 add2 = x + y
 sub2 = x - y
-mul2 = x * y
 div2 = pdiv(x, y)
+mul2 = x * y
 cos1 = cos(x)
-sin1 = sin(x)  # TODO useless ...
+sin1 = sin(x)

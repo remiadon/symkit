@@ -1,98 +1,103 @@
+from functools import lru_cache
+from typing import List
+
 import numpy as np
+import sympy as sp
 from sklearn.utils import check_random_state
-from sympy import S, Symbol, preorder_traversal
-
-_STATE = check_random_state(23)
-
-
-def is_function(expr):
-    from sympy import Function
-    from sympy.core.operations import AssocOp
-
-    return isinstance(expr, (Function, AssocOp))
+from sympy import Function, S, Symbol, postorder_traversal, preorder_traversal, sympify
+from sympy.core.operations import AssocOp
 
 
-def get_subtree(expr, start=0, random_state=_STATE):
+def is_op(expr: sp.Expr):
+    return expr.free_symbols != {expr}
+
+
+def arity(expr: sp.Expr):
+    return expr.count(Symbol)
+
+
+def get_subtree(expr, random_state, start=0):
     picks = list(preorder_traversal(expr))[start:]
     if not picks:
         return S.Zero
-    probs = np.array([0.9 if is_function(_) else 0.1 for _ in picks])
+    probs = np.array([0.9 if is_op(_) else 0.1 for _ in picks])
     probs /= probs.sum()
     return random_state.choice(picks, p=probs)
 
 
-def random_expr_full(ops, syms, size, random_state):
-    ops = list({_ for _ in ops if _.count(Symbol) < size})
+def random_expr_full(
+    operators: List[sp.Expr],
+    symbols: List[sp.Symbol],
+    size: int,
+    random_state,
+    p_float: float = 0.2,
+):
+    ops = list({_ for _ in operators if arity(_) < size})
     if size <= 1 or not ops:
-        return random_state.choice(syms)
+        if random_state.choice([1, 0], p=[p_float, 1 - p_float]):
+            return sympify(random_state.random_sample())
+        else:
+            return random_state.choice(symbols)
+
     op = random_state.choice(ops)
     orig_syms = list(op.free_symbols)
     subs = list()
-    d, remained = divmod(size - 1, len(orig_syms))
+    d, remained = divmod(size - 1, arity(op))
     for orig_sym in orig_syms:
         _size = d + remained if orig_sym == orig_syms[-1] else d
-        sub_expr = random_expr_full(ops, syms, _size, random_state)
+        sub_expr = random_expr_full(ops, symbols, _size, random_state, p_float)
         subs.append((orig_sym, sub_expr))
     return op.subs(subs)
 
 
-"""
-def random_expr_full(ops, syms, size, random_state):
-    ops = list({_ for _ in ops if _.count(Symbol) < size})
-    if not ops:
-        return random_state.choice(syms)
-    expr = random_state.choice(ops)
-    _size = size - complexity(expr)
-    _syms = expr.find(Symbol)
-    while _size > 0 and _syms:
-        ops = list({_ for _ in ops if _.count(Symbol) <= _size // len(_syms)})
-        if not ops:
-            break
-        sub_exprs = random_state.choice(ops, size=len(_syms))
-        expr = expr.subs(zip(_syms, sub_exprs))
-        _size = size - complexity(expr)  # costly but handle simplifications
-        _syms = expr.find(Symbol)
-
-    replace = random_state.choice(syms, size=expr.count(Symbol))
-    expr = expr.subs(zip(_syms, replace))
-    return expr
-"""
-
-
-def random_expr_grow(ops, syms, size, random_state):
-    expr = random_state.choice(syms)
-    _size = 1
-    ops = [_ for _ in ops if _.count(Symbol) <= size - _size]
-    while _size <= size and ops:
-        p = np.array([_.count(Symbol) ** 2 for _ in ops])
+def random_expr_grow(
+    operators: List[sp.Function],
+    symbols: List[sp.Symbol],
+    size: int,
+    random_state,
+    p_float: float = 0.2,
+):
+    expr = random_state.choice(symbols)  # TODO : add float with p_float
+    ops = list({_ for _ in operators if arity(_) < size})
+    while ops:
+        p = np.array([arity(_) ** 2 for _ in ops])
         p = p / p.sum()
         op = random_state.choice(ops, p=p)
-        _syms = random_state.choice(syms, size=op.count(Symbol) - 1)
+        _syms = random_state.choice(symbols, size=arity(op) - 1)
         args = [expr] + _syms.tolist()
-        expr = type(op)(*args)
-        _size = complexity(expr)  # expansive but only way to control simplifications
-        ops = [_ for _ in ops if _.count(Symbol) <= size - _size]
+        expr = type(op)(
+            *args
+        )  # TODO : avoid that in order to passed bases containing fixed arguments
+        ops = [_ for _ in ops if arity(_) <= size - complexity(expr)]
     return expr
 
 
-def hoist_mutation(expr, **kwargs):
+def hoist_mutation(expr, random_state):
     to_replace = get_subtree(
-        expr, start=1, **kwargs
+        expr, start=1, random_state=random_state
     )  # start at 1 to avoid taking the root
-    sub = get_subtree(to_replace, start=1, **kwargs)
+    sub = get_subtree(to_replace, start=1, random_state=random_state)
     return expr.subs(to_replace, sub)
 
 
-def subtree_mutation(expr, ops, syms, random_state=_STATE):
+def subtree_mutation(
+    expr: sp.Expr,
+    functions: List[sp.Function],
+    symbols: List[sp.Symbol],
+    random_state,
+    p_float=0.2,
+):
     if not expr or not expr.args:
-        return random_state.choice(syms)
+        return random_state.choice(symbols)
     to_replace = random_state.choice(expr.args)
     size = complexity(to_replace)
     if random_state.choice([0, 1]):
         random_meth = random_expr_full
     else:
         random_meth = random_expr_grow
-    new_expr = random_meth(ops, syms, size=size, random_state=random_state)
+    new_expr = random_meth(
+        functions, symbols, size=size, random_state=random_state, p_float=p_float
+    )
     return expr.subs(to_replace, new_expr)
 
 
@@ -104,15 +109,35 @@ def crossover(donor, receiver, random_state):
     return receiver.subs(to_replace, replace)
 
 
-def arity(expr):  # TODO : see sympy.function.arity
-    return len(expr.find(lambda e: e.is_symbol))
-
-
 def complexity(expr):
     ctr = 0
     for _ in preorder_traversal(expr):
-        if is_function(_) and _.args[0] == -1:
+        if _.is_Mul and _.args[0] == -1:  # eg. -X1 is X1 * -1
             ctr -= 1
             continue
         ctr += 1
     return ctr
+
+
+@lru_cache()
+def tree_hash(expr: sp.Expr):
+    hashes = list()
+    for node in postorder_traversal(expr):
+        to_hash = type(node) if node.args else node
+        hashes.append(hash(to_hash))
+    return sorted(hashes)
+
+
+def tree_distance(expr1: sp.Expr, expr2: sp.Expr):
+    H1, H2 = tree_hash(expr1), tree_hash(expr2)
+    i = j = count = 0
+    while i < len(H1) and j < len(H2):
+        if H1[i] == H2[j]:
+            count += 1
+            i += 1
+            j += 1
+        elif H1[i] < H2[j]:
+            i += 1
+        else:
+            j += 1
+    return 1 - ((2 * count) / (len(H1) + len(H2)))
