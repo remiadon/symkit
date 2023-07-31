@@ -4,3 +4,5 @@
  - pareto front optimisation          [X]
    - multi-objective optimisation (eg. return vs risk ) ?   [ ]
  - SymbolicRegression for symbolic regression on timeseries  [ ]
+ - scikit-learn tree structure into a sympy expression
+ - 
