@@ -33,10 +33,10 @@ Symbolic Regression runs `Genetic Programming` in order to produce the N bests p
 ## How is Symkit different from other Symbolic Regression packages like gplearn ?
 At each round in the genetic programming process, we need to evaluate the entire population of polynomials on the training data. If you consider a usual population size of 1000 and 500 rounds until what we assume to be convergence, this can quickly become very expensive to run on an off-the-shelf laptop, even for a medium-sized dataset.  
 Taking a step back, we can do better. At each round, indivuals are likely to share sub-expressions (they may share a common parent, and potentially grand-parents ...). 
-In sympy this is known a [Common Subexpression Elimination](https://docs.sympy.org/latest/modules/rewriting.html#common-subexpression-detection-and-collection), but it's essentialy a graph optimization technique. Extracting the common subparts to all our expressions, we can precompute them, and then inline them back into our original expressions ! This saves an enormous amount a CPU and RAM !!
+In sympy this is known a [Common Subexpression Elimination](https://docs.sympy.org/latest/modules/rewriting.html#common-subexpression-detection-and-collection), but it's essentialy a graph optimization technique. Extracting the common subparts to all our expressions, we can precompute results and inline them back into our original expressions ! This saves an enormous amount a CPU and RAM !!
 
 ### Why using polars in the context of Symkit ?
-The polars engine not only submit computation to multiple threads, but applies graph optimization before running your expressions. The only extra step we need is to convert a sympy expr to a polars expr (see [core.py](https://github.com/remiadon/symkit/blob/master/symkit/core.py)
+The polars engine not only submit computation to multiple threads, but applies graph optimization before running your expressions. The only extra step we need is to convert a sympy expr to a polars expr (see [core.py](https://github.com/remiadon/symkit/blob/master/symkit/core.py) )
 
 ![Symkit](https://github.com/remiadon/symkit/assets/2931080/1b9c6051-fdd6-4ec6-8d85-79ccc840a452)
 
