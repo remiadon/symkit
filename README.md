@@ -11,7 +11,7 @@ In Python we would end up with a decision
 
     predictions =  b + sum(X[i] * wi for i, wi in enumerate(W))
 ```
-In this scenario we learned the coefficients but some overall structure will never change
+In this scenario we learned the coefficients, but the overall structure will never change
  1) we **multiply** every input feature by its corresponding coefficient
  2) we aggregate resulting values using a **sum** function
  3) we **add** the bias 
