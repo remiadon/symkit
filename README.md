@@ -13,7 +13,7 @@ In Python we would end up with a decision
 ```
 In this scenario we learned the coefficients (learned) but some structural aspect will never change
  1) we **multiply** every input feature by its corresponding coefficient
- 2) we aggregate resulting values using a **sum%% function
+ 2) we aggregate resulting values using a **sum** function
  3) we **add** the bias 
 
 Of course we have access to a variety of more complex, non-linear models out there, but they are usually harder to explain ...
