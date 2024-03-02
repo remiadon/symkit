@@ -20,7 +20,7 @@ Of course we have access to a variety of more complex, non-linear models out the
 
 ### Where does Symbolic Regression stand then ?
 [Symbolic Regression](https://en.wikipedia.org/wiki/Symbolic_regression#:~:text=Symbolic%20regression%20(SR)%20is%20a,regression%20to%20represent%20a%20function.) aims at learning not only the (potential) coefficients but first and foremost the structure of the model.
-The resulting relaxed model consists in polynomial, build by composition from 
+The resulting relaxed model consists in polynomial, built by composition from 
  - our input variables, eg. `Age` and `Height`
  - a set of operator at hand, eg. addition, substraction, multiplication and division
 
