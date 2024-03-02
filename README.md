@@ -1,7 +1,8 @@
 ## Symbolic Regression 101
 ### About simple ML models
-In Machine Learning we often borrow models from an extensive literature.
-In the case of the Linear Regression we have a **fixed structure**, and the training phase (calling `fit`) consists in finding the coefficients to the equation
+Let's consider [Linear Regression](https://en.wikipedia.org/wiki/Linear_regression) to illustrate a few shortcomings of traditional (in this case linear) ML methods.
+While the number of terms in the equetion is derived from the dimension of our input data, **the structure of this equation is fixed** and known in advance
+
 In Python we would end up with a decision
 ```
     X = # get data to predict on
@@ -10,10 +11,10 @@ In Python we would end up with a decision
 
     predictions =  b + sum(X[i] * wi for i, wi in enumerate(W))
 ```
-In this scenario we learned reuse the coefficients (learned) but some structural aspect will never change
+In this scenario we learned the coefficients (learned) but some structural aspect will never change
  1) we **multiply** every input feature by its corresponding coefficient
- 2) we aggregate resulting values using a `sum` function
- 3) we `add` the bias 
+ 2) we aggregate resulting values using a **sum%% function
+ 3) we **add** the bias 
 
 Of course we have access to a variety of more complex, non-linear models out there, but they are usually harder to explain ...
 
