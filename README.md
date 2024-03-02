@@ -38,7 +38,8 @@ In sympy this is known a [Common Subexpression Elimination](https://docs.sympy.o
 ### Why using polars in the context of Symkit ?
 The polars engine not only submit computation to multiple threads, but applies graph optimization before running your expressions. The only extra step we need is to convert a sympy expr to a polars expr (see [core.py](https://github.com/remiadon/symkit/blob/master/symkit/core.py) )
 
-![Symkit](https://github.com/remiadon/symkit/assets/2931080/1b9c6051-fdd6-4ec6-8d85-79ccc840a452)
+![Symkit](https://github.com/remiadon/symkit/assets/2931080/0567bb4a-1753-4bb5-969b-0869130d0da4)
+
 
 
 
